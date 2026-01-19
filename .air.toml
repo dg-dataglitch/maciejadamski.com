@@ -1,0 +1,33 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # On file change: regenerate templ, rebuild site, restart server
+  cmd = "templ generate && go run ./cmd/build"
+  bin = "./tmp/dev-server"
+  full_bin = "go run ./cmd/dev"
+  include_ext = ["go", "templ", "md", "css"]
+  exclude_dir = ["tmp", "vendor", "dist", ".git"]
+  include_dir = []
+  exclude_file = []
+  exclude_regex = ["_templ\\.go$"]
+  delay = 1000
+  stop_on_error = false
+  log = "build-errors.log"
+  rerun = false
+  rerun_delay = 500
+  send_interrupt = true
+  kill_delay = 500
+
+[log]
+  time = false
+  main_only = true
+
+[color]
+  main = "magenta"
+  watcher = "cyan"
+  build = "yellow"
+  runner = "green"
+
+[misc]
+  clean_on_exit = true

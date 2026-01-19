@@ -1,0 +1,22 @@
+# https://golangci-lint.run/
+
+run:
+    # timeout for analysis, e.g. 30s, 5m, default is 1m
+    timeout: 5m
+
+linters:
+    disable-all: true
+    enable:
+        - errcheck
+        - gosimple
+        - govet
+        - ineffassign
+        - staticcheck
+        - unused
+        - typecheck
+
+linters-settings:
+    govet:
+        enable-all: true
+        disable:
+            - fieldalignment # annoying for web APIs

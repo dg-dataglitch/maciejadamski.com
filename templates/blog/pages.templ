@@ -1,0 +1,60 @@
+package blog
+
+import (
+	"rkb/pkg/markdown"
+	"rkb/pkg/website"
+	"rkb/templates/layouts"
+)
+
+templ Index(site website.SiteConfig, seo website.SEO, posts []markdown.Post) {
+	@layouts.Base(site, seo, "/blog/") {
+		<div class="max-w-2xl mx-auto px-6 py-24">
+			<div class="mb-16">
+				<h1 class="text-4xl font-light mb-4">Blog</h1>
+				<p class="text-gray">Thoughts, ideas, and tutorials</p>
+			</div>
+			<div class="flex flex-col gap-12">
+				for _, post := range posts {
+					if post.Meta.Published {
+						<div class="border-b border-border pb-12 last:border-0">
+							<p class="text-gray text-xs uppercase tracking-widest mb-4">{ post.Meta.Date }</p>
+							<h2 class="text-xl mb-3">{ post.Meta.Title }</h2>
+							if post.Meta.Description != "" {
+								<p class="text-gray text-sm mb-6">{ post.Meta.Description }</p>
+							}
+							<a href={ templ.SafeURL("/blog/" + post.Slug + "/") } class="text-sm uppercase tracking-widest text-white">
+								Read more →
+							</a>
+						</div>
+					}
+				}
+			</div>
+			if len(posts) == 0 {
+				<div class="text-center py-16">
+					<p class="text-gray">No posts yet. Check back soon!</p>
+				</div>
+			}
+		</div>
+	}
+}
+
+templ PostPage(site website.SiteConfig, seo website.SEO, post markdown.Post) {
+	@layouts.Base(site, seo, "/blog/"+post.Slug+"/") {
+		<article class="max-w-2xl mx-auto px-6 py-24">
+			<header class="mb-12">
+				<h1 class="text-4xl font-light mb-4">{ post.Meta.Title }</h1>
+				<div class="flex gap-4 text-gray text-sm">
+					<span>{ post.Meta.Date }</span>
+				</div>
+			</header>
+			<div class="prose prose-invert prose-lg max-w-none">
+				@templ.Raw(post.Content)
+			</div>
+			<footer class="mt-16 pt-8 border-t border-border">
+				<a href="/blog/" class="text-sm uppercase tracking-widest">
+					← Powrót do bloga
+				</a>
+			</footer>
+		</article>
+	}
+}

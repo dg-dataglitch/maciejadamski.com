@@ -1,0 +1,158 @@
+package layouts
+
+import (
+	"encoding/json"
+	"rkb/pkg/website"
+	"rkb/templates/components"
+)
+
+func organizationJSON(site website.SiteConfig) string {
+	org := map[string]interface{}{
+		"@context":    "https://schema.org",
+		"@type":       "Organization",
+		"name":        site.Name,
+		"url":         site.URL,
+		"description": site.Description,
+		"logo":        absoluteURL(site, site.OrgLogo),
+	}
+	b, _ := json.Marshal(org)
+	return string(b)
+}
+
+func absoluteURL(site website.SiteConfig, path string) string {
+	if path == "" {
+		return ""
+	}
+	if len(path) > 4 && (path[:4] == "http" || path[:5] == "https") {
+		return path
+	}
+	return site.URL + path
+}
+
+func getSEOImage(site website.SiteConfig, seo website.SEO) string {
+	if seo.Image != "" {
+		return absoluteURL(site, seo.Image)
+	}
+	return absoluteURL(site, site.DefaultImage)
+}
+
+func articleJSON(site website.SiteConfig, seo website.SEO, path string) string {
+	article := map[string]interface{}{
+		"@context":      "https://schema.org",
+		"@type":         "Article",
+		"headline":      seo.Title,
+		"description":   seo.Description,
+		"url":           site.URL + path,
+		"datePublished": seo.PublishedAt,
+		"image":         getSEOImage(site, seo),
+		"publisher": map[string]interface{}{
+			"@type": "Organization",
+			"name":  site.Name,
+			"logo": map[string]interface{}{
+				"@type": "ImageObject",
+				"url":   absoluteURL(site, site.OrgLogo),
+			},
+		},
+	}
+	b, _ := json.Marshal(article)
+	return string(b)
+}
+
+func getOGType(seo website.SEO) string {
+	if seo.Type != "" {
+		return seo.Type
+	}
+	return "website"
+}
+
+templ Base(site website.SiteConfig, seo website.SEO, currentPath string) {
+	<!DOCTYPE html>
+	<html lang={ site.Language } class="dark h-full antialiased overflow-y-scroll">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+			<!-- Fonts: JetBrains Mono -->
+			<link rel="preconnect" href="https://fonts.googleapis.com"/>
+			<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+			<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100..800&display=swap" rel="stylesheet"/>
+			<!-- Custom CSS -->
+			<link rel="stylesheet" href="/static/css/prose.css"/>
+			<title>{ seo.Title }</title>
+			if seo.Description != "" {
+				<meta name="description" content={ seo.Description }/>
+			}
+			if seo.Canonical != "" {
+				<link rel="canonical" href={ seo.Canonical }/>
+			} else {
+				<link rel="canonical" href={ site.URL + currentPath }/>
+			}
+			if seo.NoIndex {
+				<meta name="robots" content="noindex,nofollow"/>
+			} else {
+				<meta name="robots" content="index,follow"/>
+			}
+			<!-- Open Graph -->
+			<meta property="og:type" content={ getOGType(seo) }/>
+			<meta property="og:url" content={ site.URL + currentPath }/>
+			<meta property="og:title" content={ seo.Title }/>
+			if seo.Description != "" {
+				<meta property="og:description" content={ seo.Description }/>
+			}
+			<meta property="og:image" content={ getSEOImage(site, seo) }/>
+			<meta property="og:site_name" content={ site.Name }/>
+			<!-- Twitter -->
+			<meta name="twitter:card" content="summary"/>
+			<meta name="twitter:title" content={ seo.Title }/>
+			if seo.Description != "" {
+				<meta name="twitter:description" content={ seo.Description }/>
+			}
+			<meta name="twitter:image" content={ getSEOImage(site, seo) }/>
+			<!-- Google -->
+			if site.GoogleSearchConsoleVerify != "" {
+				<meta name="google-site-verification" content={ site.GoogleSearchConsoleVerify }/>
+			}
+			<!-- Structured Data -->
+			if currentPath == "/" {
+				<script type="application/ld+json">{ organizationJSON(site) }</script>
+			}
+			if seo.Type == "article" {
+				<script type="application/ld+json">{ articleJSON(site, seo, currentPath) }</script>
+			}
+			<!-- Tailwind CSS -->
+			<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+			<script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script>
+			<style type="text/tailwindcss">
+@theme {
+					--font-sans: 'JetBrains Mono', monospace;
+                    --font-mono: 'JetBrains Mono', monospace;
+					--color-white: #e4e4e5;
+                    --color-gray: #909093;
+                    --color-link: #b2c3ff;
+                    --color-surface: #343438;
+                    --color-border: #39393b;
+}
+                body {
+                    font-family: 'JetBrains Mono', monospace;
+                }
+                a {
+                    color: #b2c3ff;
+                    text-decoration: underline;
+                }
+                /* Selection color to match google style potentially? */
+</style>
+			<!-- Alpine.js -->
+			<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+			<!-- Analytics -->
+			if site.GoogleAnalyticsID != "" {
+				<script async src={ "https://www.googletagmanager.com/gtag/js?id=" + site.GoogleAnalyticsID }></script>
+			}
+		</head>
+		<body class="bg-[#1c1c1d] text-white text-base min-h-full flex flex-col">
+			@components.Navbar(site)
+			<main class="flex-1">
+				{ children... }
+			</main>
+			@components.Footer(site)
+		</body>
+	</html>
+}
