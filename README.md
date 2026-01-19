@@ -1,42 +1,40 @@
-# go-ssg-template
+# maciej-adamski
 
-A minimal, fast static site generator built with **Go**, **Templ**, and **Bootstrap 5.3**.
+Personal website and blog built with **Go**, **templ**, and a minimal Tailwind setup (via CDN). Static pages are generated at build time and served from the `dist/` folder.
 
-## Features
+## What this repo contains
 
-- ⚡ **Lightning Fast** - Pure static HTML, no client-side JS frameworks
-- 🌙 **Dark/Light Mode** - Built-in theme switcher with Bootstrap 5.3 color modes
-- 📱 **Mobile-First** - No hover effects or transitions for better mobile performance
-- 🎨 **Bootstrap 5.3** - Modern styling with SCSS customization
-- 📝 **Markdown Blog** - Write posts in markdown with frontmatter
-- 🔍 **SEO Ready** - Meta tags, Open Graph, sitemap, robots.txt
-- 🔥 **Hot Reload** - Air-powered development server
+- ⚡ **Static output** for fast load times and easy hosting
+- 📝 **Markdown blog** with frontmatter metadata
+- 🔍 **SEO basics**: canonical URLs, Open Graph, Twitter cards, sitemap, robots.txt
+- 🔁 **Dev server** with live rebuilds
 
-## Quick Start
+## How it works
 
-```bash
+- `cmd/build` renders templates and Markdown into `dist/`.
+- `cmd/dev` runs a local server and rebuilds on changes (via Air).
+- `templates/` contains templ components; `content/posts/` contains Markdown posts.
+
+## Quick start
+
+```
 # Clone
-git clone https://github.com/YOUR_USERNAME/go-ssg-template.git my-site
-cd my-site
+git clone https://github.com/<your-username>/<repo>.git
+cd <repo>/website
 
-# Install dependencies
+# Install Go deps
 go mod download
-npm install
 
-# Setup
+# Setup environment
 cp .env.example .env
 
-# Build CSS and site
-make css
-make build
-
-# Development with hot reload
+# Run dev server (auto rebuild)
 make dev
 ```
 
-Open http://localhost:3000
+Open <http://localhost:3000>
 
-### Testing on Mobile
+### Testing on mobile
 
 When you run `make dev`, the server binds to `0.0.0.0` and shows your local network IP:
 
@@ -47,7 +45,7 @@ When you run `make dev`, the server binds to `0.0.0.0` and shows your local netw
 
 Open the Network URL on your phone (same WiFi) to test mobile directly.
 
-## Project Structure
+## Project structure
 
 ```
 ├── cmd/build/        # Build command
@@ -58,9 +56,7 @@ Open the Network URL on your phone (same WiFi) to test mobile directly.
 │   ├── components/   # Navbar, Footer
 │   ├── website/      # Homepage
 │   └── blog/         # Blog templates
-├── static/           # Static assets
-│   ├── scss/         # Bootstrap customization
-│   └── css/          # Compiled CSS
+├── static/           # Static assets (CSS, icons, robots/sitemap templates)
 ├── dist/             # Generated output (gitignored)
 └── .env              # Configuration
 ```
@@ -72,53 +68,39 @@ Edit `.env`:
 ```env
 SITE_NAME=My Website
 SITE_URL=https://example.com
-SITE_DESCRIPTION=My awesome site
+SITE_DESCRIPTION=My personal website
 GOOGLE_ANALYTICS_ID=G-XXXXXXXXXX
 ```
 
-## Writing Blog Posts
+## Writing blog posts
 
 Create a markdown file in `content/posts/`:
 
-```markdown
+```
 ---
 title: "My Post Title"
 description: "A brief description"
-date: "2024-01-15"
-author: "Your Name"
+date: "2026-01-15T12:00:00Z"
 published: true
 ---
 
 Your content here...
 ```
 
-## Customizing Styles
+## Customizing styles
 
-Edit `static/scss/main.scss` to customize Bootstrap variables:
-
-```scss
-// Colors
-$primary: #000000;
-
-// Typography
-$font-family-base: 'Inter', system-ui, sans-serif;
-```
-
-Then rebuild CSS:
-
-```bash
-make css
-```
+Tailwind is included via CDN in [templates/layouts/base.templ](templates/layouts/base.templ). Update classes directly in templates or extend the inline Tailwind theme block.
 
 ## Deployment
 
 Build the static site:
 
-```bash
+```
 make build
 ```
 
 Deploy the `dist/` folder to any static hosting:
+
 - **GitHub Pages**
 - **Cloudflare Pages**
 - **Netlify**
@@ -127,7 +109,6 @@ Deploy the `dist/` folder to any static hosting:
 ## Requirements
 
 - Go 1.21+
-- Node.js 18+ (for SCSS compilation)
 - Air (for hot reload): `go install github.com/air-verse/air@latest`
 - Templ: `go install github.com/a-h/templ/cmd/templ@latest`
 
