@@ -27,7 +27,10 @@ func latestPublishedPost(posts []markdown.Post) *markdown.Post {
 		}
 		t, err := time.Parse(time.RFC3339, p.Meta.Date)
 		if err != nil {
-			continue
+			t, err = time.Parse("2006-01-02", p.Meta.Date)
+			if err != nil {
+				continue
+			}
 		}
 		if latest == nil || t.After(latestTime) {
 			latest = p

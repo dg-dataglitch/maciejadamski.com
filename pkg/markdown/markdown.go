@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/yuin/goldmark"
 	meta "github.com/yuin/goldmark-meta"
@@ -27,6 +28,19 @@ type Post struct {
 	Meta    PostMeta
 	Content string // HTML content
 	Slug    string // URL-safe identifier
+}
+
+// FormattedDate returns the date in a human-readable format (e.g. "January 02, 2006").
+// It attempts to parse the date as RFC3339 or "2006-01-02".
+func (p Post) FormattedDate() string {
+	t, err := time.Parse(time.RFC3339, p.Meta.Date)
+	if err != nil {
+		t, err = time.Parse("2006-01-02", p.Meta.Date)
+		if err != nil {
+			return p.Meta.Date // Return raw string if parsing fails
+		}
+	}
+	return t.Format("January 02, 2006")
 }
 
 // ParseFile reads a markdown file and extracts frontmatter and content.
