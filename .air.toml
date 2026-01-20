@@ -3,7 +3,7 @@ tmp_dir = "tmp"
 
 [build]
   # On file change: regenerate templ, rebuild site, restart server
-  cmd = "templ generate && go run ./cmd/build"
+  cmd = "templ fmt . && templ generate && go run ./cmd/build"
   bin = "./tmp/dev-server"
   full_bin = "go run ./cmd/dev"
   include_ext = ["go", "templ", "md", "css"]
