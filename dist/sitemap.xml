@@ -9,11 +9,7 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://maciejadamski.com/blog/building-modern-websites/</loc>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://maciejadamski.com/blog/getting-started/</loc>
+    <loc>https://maciejadamski.com/blog/no-select-star/</loc>
     <priority>0.6</priority>
   </url>
 </urlset>
