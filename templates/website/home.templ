@@ -71,7 +71,7 @@ var techStackCore = []TechCategory{
 	},
 }
 
-templ Home(site website.SiteConfig, seo website.SEO, latestPost *markdown.Post) {
+templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post) {
 	@layouts.Base(site, seo, "/") {
 		// --- HERO SECTION ---
 		<section class="relative isolate px-6 lg:px-8">
@@ -92,8 +92,8 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPost *markdown.Post) 
 						Welcome to my digital garden. 🌱
 					</p>
 					<div class="mt-10 flex flex-col items-start md:flex-row md:items-center gap-6">
-						<a href="/blog/" class="text-sm font-semibold">Read my Blog</a>
-						<a href="https://www.linkedin.com/in/maciejadamski89/" target="_blank" class="text-sm font-semibold">Connect with me on LinkedIn <span aria-hidden="true">&rarr;</span></a>
+						<a href="/blog/" class="text-sm font-semibold text-link underline underline-offset-4">Read my Blog</a>
+						<a href="https://www.linkedin.com/in/maciejadamski89/" target="_blank" class="text-sm font-semibold text-link underline underline-offset-4">Connect with me on LinkedIn <span aria-hidden="true">&rarr;</span></a>
 					</div>
 				</div>
 			</div>
@@ -111,8 +111,7 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPost *markdown.Post) 
 						But code is just one part of the equation.
 					</p>
 					<p>
-						I am also a proud dad, an animal lover, and a devoted reader. I believe that the principles of good engineering—
-						clarity, patience, and continuous improvement—apply just as well to fatherhood and personal growth.
+						I am also a proud dad, an animal lover, a musician, a gamer, and a reader of mind-changing books. I believe that the principles of good engineering, clarity, patience, and continuous improvement, apply just as well to fatherhood and personal growth.
 					</p>
 					<p>
 						On this site, I share what I’m learning from books, bugs, and life.
@@ -137,7 +136,7 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPost *markdown.Post) 
 						Whether you need to launch a vision faster with an MVP, transform data into your most valuable asset, or build on a rock-solid foundation, we are the partner you can trust.
 					</p>
 					<div class="mt-4">
-						<a href="https://dataglit.ch/" target="_blank" class="text-sm font-semibold text-white hover:text-gray-300">
+						<a href="https://dataglit.ch/" target="_blank" class="text-sm font-semibold text-link underline underline-offset-4">
 							Visit Dataglitch <span aria-hidden="true">&rarr;</span>
 						</a>
 					</div>
@@ -155,7 +154,7 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPost *markdown.Post) 
 					<p>
 						I believe that complexity is the enemy of reliability. My approach to engineering (and life) is built on five core principles:
 					</p>
-					<ul class="list-disc pl-6 space-y-2">
+					<ul class="list-disc pl-6 space-y-4">
 						<li>
 							<span class="text-white font-semibold">Simplicity is the Goal.</span> "Make things as simple as possible, but not simpler." I prefer boring, predictable code over clever hacks.
 						</li>
@@ -180,16 +179,16 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPost *markdown.Post) 
 			<div class="max-w-3xl mx-auto">
 				<h2 class="text-xl font-bold text-white mb-8">/stack</h2>
 				<p class="text-gray mb-10">
-					A snapshot of what I focus on now, plus the broader stack I’m familiar with from previous work.
+					A snapshot of the stack I use and the tools I reach for.
 				</p>
-				<div x-data="{ showMore: false }" class="space-y-8">
+				<div class="space-y-8">
 					for _, category := range techStackCore {
 						<div>
 							<h3 class="text-sm uppercase tracking-widest text-gray mb-4">{ category.Title }</h3>
 							<ul class="flex flex-wrap gap-3 text-sm">
 								for _, item := range category.Items {
 									<li class="px-3 py-1 rounded-full border border-border text-gray">
-										<a href={ item.URL } target="_blank" rel="noopener noreferrer">{ item.Name }</a>
+										<a href={ item.URL } target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">{ item.Name }</a>
 									</li>
 								}
 							</ul>
@@ -199,27 +198,29 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPost *markdown.Post) 
 			</div>
 		</section>
 		// --- BLOG PROMO ---
-		<section class="py-24 px-6">
+		<section class="pt-24 pb-36 px-6">
 			<div class="max-w-3xl mx-auto">
 				<h2 class="text-xl font-bold text-white mb-8">/latest_thoughts</h2>
-				<div class="space-y-8">
-					if latestPost != nil {
-						<article class="flex flex-col items-start justify-between">
-							<div class="flex items-center gap-x-4 text-sm">
-								<time datetime={ latestPost.Meta.Date } class="text-gray">{ latestPost.FormattedDate() }</time>
-							</div>
-							<div class="group relative">
-								<h3 class="mt-3 text-lg font-semibold leading-6 text-white">
-									<a href={ templ.SafeURL("/blog/" + latestPost.Slug + "/") }>
-										<span class="absolute inset-0"></span>
-										{ latestPost.Meta.Title }
-									</a>
-								</h3>
-								if latestPost.Meta.Description != "" {
-									<p class="mt-5 line-clamp-3 text-base/7 text-white">{ latestPost.Meta.Description }</p>
-								}
-							</div>
-						</article>
+				<div class="divide-y divide-border">
+					if len(latestPosts) > 0 {
+						for _, post := range latestPosts {
+							<article class="py-8 first:pt-0">
+								<div class="flex items-center gap-x-4 text-sm">
+									<time datetime={ post.Meta.Date } class="text-gray">{ post.FormattedDate() }</time>
+								</div>
+								<div class="relative">
+									<h3 class="mt-3 text-lg font-semibold leading-6 text-white">
+										<a href={ templ.SafeURL("/blog/" + post.Slug + "/") } class="text-link underline underline-offset-4">
+											<span class="absolute inset-0"></span>
+											{ post.Meta.Title }
+										</a>
+									</h3>
+									if post.Meta.Description != "" {
+										<p class="mt-5 line-clamp-3 text-base/7 text-white">{ post.Meta.Description }</p>
+									}
+								</div>
+							</article>
+						}
 					} else {
 						<p class="text-gray">No posts yet. Check back soon!</p>
 					}
@@ -227,10 +228,10 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPost *markdown.Post) 
 			</div>
 		</section>
 		// --- OPEN SOURCE ---
-		<section class="py-12 px-6 border-t border-border">
+		<section class="py-12 px-6 border-t border-border bg-surface">
 			<div class="max-w-3xl mx-auto text-center">
-				<p class="text-gray text-sm">
-					You can find the code for this website here: <a href="https://github.com/dg-dataglitch/maciejadamski.com" target="_blank" class="text-white hover:text-gray-300 underline">GitHub Repo</a>
+				<p class="text-white text-base">
+					<a href="https://github.com/dg-dataglitch/maciejadamski.com" target="_blank" class="text-link underline underline-offset-4">You can find the code for this website here</a>
 				</p>
 			</div>
 		</section>
