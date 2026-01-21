@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"text/template"
 	"time"
 
@@ -17,27 +18,36 @@ import (
 	webTemplates "rkb/templates/website"
 )
 
-func latestPublishedPost(posts []markdown.Post) *markdown.Post {
-	var latest *markdown.Post
-	var latestTime time.Time
-	for i := range posts {
-		p := &posts[i]
-		if !p.Meta.Published {
-			continue
-		}
-		t, err := time.Parse(time.RFC3339, p.Meta.Date)
-		if err != nil {
-			t, err = time.Parse("2006-01-02", p.Meta.Date)
-			if err != nil {
-				continue
-			}
-		}
-		if latest == nil || t.After(latestTime) {
-			latest = p
-			latestTime = t
-		}
+func parsePostDate(date string) time.Time {
+	if date == "" {
+		return time.Time{}
 	}
-	return latest
+	parsed, err := time.Parse(time.RFC3339, date)
+	if err == nil {
+		return parsed
+	}
+	parsed, err = time.Parse("2006-01-02", date)
+	if err == nil {
+		return parsed
+	}
+	return time.Time{}
+}
+
+func latestPublishedPosts(posts []markdown.Post, limit int) []markdown.Post {
+	if limit <= 0 {
+		return []markdown.Post{}
+	}
+	sorted := make([]markdown.Post, 0, len(posts))
+	for _, post := range posts {
+		sorted = append(sorted, post)
+	}
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return parsePostDate(sorted[i].Meta.Date).After(parsePostDate(sorted[j].Meta.Date))
+	})
+	if len(sorted) > limit {
+		sorted = sorted[:limit]
+	}
+	return sorted
 }
 
 func main() {
@@ -84,7 +94,7 @@ func main() {
 		}
 	}
 
-	latestPost := latestPublishedPost(publishedPosts)
+	latestPosts := latestPublishedPosts(publishedPosts, 3)
 
 	// 5. Generate static pages
 	homeSEO := website.SEO{
@@ -93,7 +103,7 @@ func main() {
 		Image:       site.DefaultImage,
 	}
 	homePath := filepath.Join(cfg.DistPath, "index.html")
-	if err := generator.RenderTemplComponent(homePath, webTemplates.Home(site, homeSEO, latestPost)); err != nil {
+	if err := generator.RenderTemplComponent(homePath, webTemplates.Home(site, homeSEO, latestPosts)); err != nil {
 		l.Error("home_render_failed", "err", err)
 	} else {
 		l.Info("page_generated", "path", "index.html")
