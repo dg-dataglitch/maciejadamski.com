@@ -19,7 +19,7 @@ templ Index(site website.SiteConfig, seo website.SEO, posts []markdown.Post) {
 						<div class="border-b border-border pb-12 last:border-0">
 							<p class="text-gray text-xs uppercase tracking-widest mb-4">{ post.FormattedDate() }</p>
 							<h2 class="text-xl font-semibold tracking-tight leading-tight mb-3">
-								<a href={ templ.SafeURL("/blog/" + post.Slug + "/") } class="hover:text-gray-300">
+								<a href={ templ.SafeURL("/blog/" + post.Slug + "/") } class="text-link underline underline-offset-4">
 									{ post.Meta.Title }
 								</a>
 							</h2>
@@ -52,7 +52,7 @@ templ PostPage(site website.SiteConfig, seo website.SEO, post markdown.Post) {
 				@templ.Raw(post.Content)
 			</div>
 			<footer class="mt-16 pt-8 border-t border-border">
-				<a href="/blog/" class="text-sm font-semibold text-white hover:text-gray-300">
+				<a href="/blog/" class="text-sm font-semibold text-link underline underline-offset-4">
 					<span aria-hidden="true">&larr;</span> Back to blog
 				</a>
 			</footer>
