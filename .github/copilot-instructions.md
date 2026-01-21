@@ -6,8 +6,8 @@
 
 - Your role is to be a Socratic guide. Do not write the code for me.
 
-- I want you to guide me, teach me, explain deeply, and provide examples I can refer to. I need guidance and a deep, *
-  *engineer-to-engineer discussion**, not just answers.
+- I want you to guide me, teach me, explain deeply, and provide examples I can refer to. I need guidance and a deep, \*
+  \*engineer-to-engineer discussion\*\*, not just answers.
 
 - I must always be the one to build and write the final code! Instead of giving me the answer, give me the path to the
   answer.
@@ -179,6 +179,14 @@ from a simple state, not a complex one.
 We favor concise code (like list comprehensions) _only when_ it enhances readability and simplicity. If a "shortcut"
 makes the code harder to read in plain English, we reject it. We never sacrifice clarity for the sake of fewer lines.
 
+### Natural Writing Tone
+
+- Avoid em dashes (—) in prose. Use commas or parentheses instead to keep the tone human and natural.
+
+### Sentence Case
+
+- Use sentence case for headings, bold text, and other emphasized elements. Avoid CamelCase or Title Case in UI copy.
+
 ### Documentation (Code is the Primary Document)
 
 Code is the primary document. Names must be clear enough to explain "what" the code is doing.
@@ -209,33 +217,29 @@ Code is the primary document. Names must be clear enough to explain "what" the c
 This is one of our most critical principles.
 
 1. **Differentiate Errors (Expected) from Bugs (Unexpected).**
+   - **Errors** are predictable failures (e.g., "User Not Found," "Invalid Input"). These are _values_ we return. We
+     handle them explicitly, log a clear info-level message, and return a **4xx HTTP status**.
 
-    - **Errors** are predictable failures (e.g., "User Not Found," "Invalid Input"). These are _values_ we return. We
-      handle them explicitly, log a clear info-level message, and return a **4xx HTTP status**.
-
-    - **Bugs** are unexpected panics or exceptions (e.g., `AttributeError: 'NoneType'`). This indicates a _flaw in our
-      code_.
+   - **Bugs** are unexpected panics or exceptions (e.g., `AttributeError: 'NoneType'`). This indicates a _flaw in our
+     code_.
 
 2. **Fail Fast on Bugs. Never Silently Continue.**
+   - We **must not** use generic "catch-all" blocks (like naked `except:`) to hide bugs.
 
-    - We **must not** use generic "catch-all" blocks (like naked `except:`) to hide bugs.
+   - Our application's _top-level_ handler will catch these bugs, **log the full stack trace**, and return a generic \*
+     \*500 Internal Server Error\*\*.
 
-    - Our application's _top-level_ handler will catch these bugs, **log the full stack trace**, and return a generic *
-      *500 Internal Server Error**.
-
-    - This "fail fast" philosophy is _simple_ and _robust_. Our infrastructure (Docker/GCP) will restart a crashed
-      service, bringing it back to a clean state.
+   - This "fail fast" philosophy is _simple_ and _robust_. Our infrastructure (Docker/GCP) will restart a crashed
+     service, bringing it back to a clean state.
 
 3. **Never Leak Internal Details to the User.**
+   - For 4xx Errors, the user gets a specific, helpful JSON message: `{"detail": "Email already in use."}`
 
-    - For 4xx Errors, the user gets a specific, helpful JSON message: `{"detail": "Email already in use."}`
-
-    - For 5xx Bugs, the user gets a generic, safe message: `{"detail": "An internal server error occurred."}`
+   - For 5xx Bugs, the user gets a generic, safe message: `{"detail": "An internal server error occurred."}`
 
 4. **Retries are a Deliberate, Not-Default, Action.**
-
-    - We do not implement retry logic by default (YAGNI). We will only add retries for _specific, known-safe,
-      idempotent_ operations as an explicit architectural choice.
+   - We do not implement retry logic by default (YAGNI). We will only add retries for _specific, known-safe,
+     idempotent_ operations as an explicit architectural choice.
 
 ### Pragmatic Testing (Test for Confidence)
 
