@@ -27,6 +27,7 @@ type Config struct {
 	TwitterHandle       string
 	GoogleSearchConsole string
 	GoogleAnalyticsID   string
+	GoogleTagManagerID  string
 }
 
 func Load() (*Config, error) {
@@ -47,6 +48,7 @@ func Load() (*Config, error) {
 		TwitterHandle:       getEnv("TWITTER_HANDLE", ""),
 		GoogleSearchConsole: getEnv("GOOGLE_SEARCH_CONSOLE", ""),
 		GoogleAnalyticsID:   getEnv("GOOGLE_ANALYTICS_ID", ""),
+		GoogleTagManagerID:  getEnv("GOOGLE_TAG_MANAGER_ID", ""),
 	}
 
 	if err := cfg.validate(); err != nil {

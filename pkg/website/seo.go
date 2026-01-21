@@ -29,6 +29,7 @@ type SiteConfig struct {
 	TwitterHandle             string
 	GoogleSearchConsoleVerify string
 	GoogleAnalyticsID         string
+	GoogleTagManagerID        string
 	Language                  string
 	OrgLogo                   string
 }
@@ -42,6 +43,7 @@ func LoadSiteConfig(cfg *config.Config) SiteConfig {
 		TwitterHandle:             cfg.TwitterHandle,
 		GoogleSearchConsoleVerify: cfg.GoogleSearchConsole,
 		GoogleAnalyticsID:         cfg.GoogleAnalyticsID,
+		GoogleTagManagerID:        cfg.GoogleTagManagerID,
 		Language:                  "en",
 		OrgLogo:                   "/static/logos/logo.svg",
 	}
