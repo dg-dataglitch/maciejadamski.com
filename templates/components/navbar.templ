@@ -6,8 +6,11 @@ templ Navbar(site website.SiteConfig) {
 	<header class="absolute inset-x-0 top-0 z-50">
 		<nav aria-label="Global" class="mx-auto max-w-7xl flex items-center justify-between p-4 lg:px-8">
 			<div class="flex lg:flex-1">
-				<a href="/" class="-m-1.5 p-1.5 text-lg font-bold text-white tracking-tight">
-					~/maciej<span class="text-gray">_adamski</span>
+				<a href="/" class="-m-1.5 p-1.5 text-white">
+					<span class="block text-2xl font-bold leading-none tracking-tight">
+						<span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span>
+					</span>
+					<span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span>
 				</a>
 			</div>
 			<div class="flex lg:hidden">
@@ -19,8 +22,8 @@ templ Navbar(site website.SiteConfig) {
 				</button>
 			</div>
 			<div class="hidden lg:flex lg:gap-x-12">
-				<a href="/blog/" class="text-sm/6 font-semibold text-white">/blog</a>
-				<a href="https://www.linkedin.com/in/maciejadamski89/" target="_blank" class="text-sm/6 font-semibold text-white">/linkedin</a>
+				<a href="/blog/" class="text-sm/6 font-semibold text-link underline underline-offset-4">/blog</a>
+				<a href="https://www.linkedin.com/in/maciejadamski89/" target="_blank" class="text-sm/6 font-semibold text-link underline underline-offset-4">/linkedin</a>
 			</div>
 		</nav>
 	</header>
@@ -29,8 +32,11 @@ templ Navbar(site website.SiteConfig) {
 			<div tabindex="0" class="fixed inset-0">
 				<el-dialog-panel class="fixed inset-y-0 right-0 z-50 w-full overflow-y-auto bg-surface p-4 sm:max-w-sm">
 					<div class="flex items-center justify-between">
-						<a href="/" class="-m-1.5 p-1.5 text-lg font-bold text-white tracking-tight">
-							~/maciej<span class="text-gray">_adamski</span>
+						<a href="/" class="-m-1.5 p-1.5 text-white">
+							<span class="block text-2xl font-bold leading-none tracking-tight">
+								<span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span>
+							</span>
+							<span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span>
 						</a>
 						<button type="button" command="close" commandfor="mobile-menu" class="-m-2.5 rounded-md p-2.5 text-gray">
 							<span class="sr-only">Close menu</span>
@@ -42,8 +48,8 @@ templ Navbar(site website.SiteConfig) {
 					<div class="mt-6 flow-root">
 						<div class="-my-6 divide-y divide-gray-500/10">
 							<div class="space-y-2 py-6">
-								<a href="/blog/" class="block py-2 text-base/7 font-semibold text-white">/blog</a>
-								<a href="https://www.linkedin.com/in/maciejadamski89/" target="_blank" class="block py-2 text-base/7 font-semibold text-white">/linkedin</a>
+								<a href="/blog/" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/blog</a>
+								<a href="https://www.linkedin.com/in/maciejadamski89/" target="_blank" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/linkedin</a>
 							</div>
 						</div>
 					</div>
