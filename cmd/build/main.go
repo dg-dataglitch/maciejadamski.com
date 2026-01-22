@@ -94,6 +94,11 @@ func main() {
 		}
 	}
 
+	// Sort posts by date (newest first)
+	sort.SliceStable(publishedPosts, func(i, j int) bool {
+		return parsePostDate(publishedPosts[i].Meta.Date).After(parsePostDate(publishedPosts[j].Meta.Date))
+	})
+
 	latestPosts := latestPublishedPosts(publishedPosts, 3)
 
 	// 5. Generate static pages
