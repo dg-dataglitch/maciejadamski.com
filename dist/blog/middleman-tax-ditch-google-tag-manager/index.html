@@ -1,0 +1,79 @@
+<!doctype html><html lang="en" class="dark h-full antialiased overflow-y-scroll"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><!-- Fonts: JetBrains Mono --><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100..800&display=swap" rel="stylesheet"><!-- Custom CSS --><link rel="stylesheet" href="/static/css/prose.css"><link rel="icon" href="/static/favicon.ico" type="image/x-icon"><title>Why developers should ditch Google Tag Manager | Maciej Adamski</title><meta name="description" content="In modern web development, there is a constant tension between marketing agility and engineering reality. GTM is often a Trojan horse. Here is why you should cut out the middleman."><link rel="canonical" href="https://maciejadamski.com/blog/middleman-tax-ditch-google-tag-manager/"><meta name="robots" content="index,follow"><!-- Open Graph --><meta property="og:type" content="article"><meta property="og:url" content="https://maciejadamski.com/blog/middleman-tax-ditch-google-tag-manager/"><meta property="og:title" content="Why developers should ditch Google Tag Manager | Maciej Adamski"><meta property="og:description" content="In modern web development, there is a constant tension between marketing agility and engineering reality. GTM is often a Trojan horse. Here is why you should cut out the middleman."><meta property="og:image" content="https://maciejadamski.com/static/og-image.png"><meta property="og:site_name" content="Maciej Adamski"><!-- Twitter --><meta name="twitter:card" content="summary"><meta name="twitter:title" content="Why developers should ditch Google Tag Manager | Maciej Adamski"><meta name="twitter:description" content="In modern web development, there is a constant tension between marketing agility and engineering reality. GTM is often a Trojan horse. Here is why you should cut out the middleman."><meta name="twitter:image" content="https://maciejadamski.com/static/og-image.png"><!-- Google --><!-- Structured Data --><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","datePublished":"2026-01-22","description":"In modern web development, there is a constant tension between marketing agility and engineering reality. GTM is often a Trojan horse. Here is why you should cut out the middleman.","headline":"Why developers should ditch Google Tag Manager | Maciej Adamski","image":"https://maciejadamski.com/static/og-image.png","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://maciejadamski.com/static/logos/logo.svg"},"name":"Maciej Adamski"},"url":"https://maciejadamski.com/blog/middleman-tax-ditch-google-tag-manager/"}</script><!-- Tailwind CSS --><script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script><script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script><style type="text/tailwindcss">
+				@theme {
+						--font-sans: 'JetBrains Mono', monospace;
+						--font-mono: 'JetBrains Mono', monospace;
+						--color-white: #e4e4e5;
+						--color-gray: #909093;
+						--color-link: #b2c3ff;
+						--color-surface: #343438;
+						--color-border: #39393b;
+						--color-page-background: #1c1c1d;
+				}
+			</style><!-- Analytics --><script async src="https://www.googletagmanager.com/gtag/js?id=G-8N2WJRPVCH"></script><script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-8N2WJRPVCH');</script></head><body class="bg-page-background font-mono text-white text-base min-h-full flex flex-col"><header class="absolute inset-x-0 top-0 z-50"><nav aria-label="Global" class="mx-auto max-w-7xl flex items-center justify-between p-4 lg:px-8"><div class="flex lg:flex-1"><a href="/" class="-m-1.5 p-1.5 text-white"><span class="block text-2xl font-bold leading-none tracking-tight"><span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span></span> <span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span></a></div><div class="flex lg:hidden"><button type="button" command="show-modal" commandfor="mobile-menu" class="-m-2.5 inline-flex items-center justify-center rounded-md p-2.5 text-gray"><span class="sr-only">Open main menu</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6"><path d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></div><div class="hidden lg:flex lg:gap-x-12"><a href="/blog/" class="text-sm/6 font-semibold text-link underline underline-offset-4">/blog</a> <a href="https://www.linkedin.com/in/maciejadamski89/" target="_blank" class="text-sm/6 font-semibold text-link underline underline-offset-4">/linkedin</a></div></nav></header><el-dialog><dialog id="mobile-menu" class="fixed inset-0 m-0 w-full max-w-none border-0 bg-transparent p-0 backdrop:bg-transparent lg:hidden"><div tabindex="0" class="fixed inset-0"><el-dialog-panel class="fixed inset-y-0 right-0 z-50 w-full overflow-y-auto bg-surface p-4 sm:max-w-sm"><div class="flex items-center justify-between"><a href="/" class="-m-1.5 p-1.5 text-white"><span class="block text-2xl font-bold leading-none tracking-tight"><span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span></span> <span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span></a> <button type="button" command="close" commandfor="mobile-menu" class="-m-2.5 rounded-md p-2.5 text-gray"><span class="sr-only">Close menu</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6"><path d="M6 18 18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></div><div class="mt-6 flow-root"><div class="-my-6 divide-y divide-gray-500/10"><div class="space-y-2 py-6"><a href="/blog/" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/blog</a> <a href="https://www.linkedin.com/in/maciejadamski89/" target="_blank" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/linkedin</a></div></div></div></el-dialog-panel></div></dialog></el-dialog><main class="flex-1"><article class="max-w-3xl mx-auto px-6 py-24"><header class="mb-12"><h1 class="text-4xl font-semibold tracking-tight leading-tight mb-4">Why developers should ditch Google Tag Manager</h1><div class="flex gap-4 text-gray text-sm"><span>January 22, 2026</span></div></header><div class="prose prose-invert max-w-none"><p>In modern web development, there is a constant tension between marketing agility and engineering reality.</p>
+<p>Marketing teams want to deploy tracking pixels, A/B testing scripts, and chat widgets instantly without waiting for a two-week engineering sprint cycle. Engineers want a clean codebase, fast load times, and version control over everything that runs in the user's browser.</p>
+<p>Google Tag Manager (GTM) was invented to solve this tension. It promised a demilitarized zone; a dashboard where marketers could inject scripts without touching the source code.</p>
+<p>It sounds like a win-win. But if you care about performance, simplicity, and maintaining control over your application, GTM is often a Trojan horse.</p>
+<p>As engineers, it is time we treated GTM for what it is; an unnecessary abstraction layer that introduces latency and technical debt.</p>
+<p>Here is the developer’s perspective on why you should cut out the middleman, which tools you actually need, and how to prove the performance cost yourself.</p>
+<h2>The high cost of &quot;convenience&quot;</h2>
+<p>My engineering philosophy is built on a simple premise; less is more. Every line of code is a liability. Every external dependency is a potential point of failure or friction.</p>
+<p>Google Tag Manager violates this principle by design. It is a container script whose sole purpose is to inject other scripts.</p>
+<h3>The technical problem -&gt; the JavaScript waterfall</h3>
+<p>When you install GTM, you aren't just adding one script to your <code>&lt;head&gt;</code>. You are adding a gatekeeper.</p>
+<p>Here is what happens in the browser network waterfall when a user visits a site using GTM:</p>
+<ol>
+<li><strong>The browser downloads <code>gtm.js</code>:</strong> This library is hefty because it contains the logic to parse rules, triggers, and variables.</li>
+<li><strong>Execution &amp; parsing:</strong> The browser’s main thread, the same thread responsible for responding to user clicks and scrolling, must pause to execute this library. It has to figure out &quot;What page am I on? What rules apply here?&quot;.</li>
+<li><strong>Injection waterfall:</strong> Once GTM figures out what to do, it starts injecting other tags. It might inject Google Analytics (<code>gtag.js</code>), then a Facebook Pixel, then a LinkedIn Insight tag.</li>
+</ol>
+<p>This is the &quot;middleman tax&quot;.</p>
+<p>Instead of the browser just downloading Google Analytics directly (a single request), it has to download the manager, run the manager, and then download analytics.</p>
+<h2>The performance impact -&gt; total blocking time (TBT)</h2>
+<p>The real killer isn't just the network request; it is the CPU usage.</p>
+<p>JavaScript is single-threaded. When GTM is busy evaluating dozens of triggers to decide if it should fire a &quot;Scroll Depth&quot; event, the main thread is blocked.</p>
+<p>If a user tries to click a button or open a menu while GTM is thinking, the site will feel sluggish or unresponsive. In performance metrics, this increases total blocking time (TBT); a metric which directly hurts your Core Web Vitals and, consequently, user experience and SEO.</p>
+<h2>The philosophy problem -&gt; loss of control</h2>
+<p>As a backend engineer, I want source control for everything. If a piece of logic changes how my application behaves, I want to see that change in a Git commit diff.</p>
+<p>GTM hides critical application logic inside a proprietary Google dashboard. If your site suddenly slows down, you can’t <code>git blame</code> to see who added a massive 5MB unoptimized Hotjar recording script. You have to log into GTM, dig through version history, and decipher what happened.</p>
+<p>If you are the engineer responsible for the site, you should control the code that runs on it.</p>
+<h2>The essentials -&gt; what you actually need</h2>
+<p>Ditching GTM does not mean flying blind. Data is crucial. But we need to distinguish between essential telemetry and bloated tag management.</p>
+<p>There are two Google tools that are non-negotiable for any serious website.</p>
+<h3>1. Google Search Console (the external health check)</h3>
+<p><strong>What it is:</strong> This is the interface between you and the Googlebot crawler.
+<strong>Why you need it:</strong> It tells you if Google can find and understand your site. You use it to submit your <code>sitemap.xml</code> (which you should generate via code in your backend). It alerts you to critical indexing errors or security issues.
+<strong>Performance cost:</strong> Zero. It runs on Google's servers, not your user's browser.</p>
+<h3>2. Google Analytics 4 (the internal telemetry)</h3>
+<p><strong>What it is:</strong> The record of user behavior on your site.
+<strong>Why you need it:</strong> To know if anyone is actually reading what you write.
+<strong>How to implement it:</strong> Hardcode the lightweight <code>gtag.js</code> snippet directly into your main layout template (e.g., your base <code>templ</code> file in Go).</p>
+<p>By hardcoding GA4, you ensure it loads as fast as possible, it is version-controlled in Git, and you aren't loading the entire GTM library just to fire a simple pageview event.</p>
+<h2>The diagnosis -&gt; how to audit your site with Lighthouse</h2>
+<p>You don't have to take my word for it. You can see the impact of scripts on your own site using Google Lighthouse, the industry-standard performance auditing tool built into Chrome.</p>
+<p>If you care about performance, Lighthouse should be part of your regular workflow.</p>
+<h3>Step-by-step audit instructions</h3>
+<ol>
+<li><strong>Open an incognito window:</strong> Always audit in Incognito/Private mode. This ensures that your own browser extensions (like ad blockers or password managers) don't interfere with the test results.</li>
+<li><strong>Open developer tools:</strong> Right-click anywhere on your page and select Inspect, or press F12 (or Cmd+Option+I on Mac).</li>
+<li><strong>Find the Lighthouse tab:</strong> In the DevTools panel, look for the tab labeled &quot;Lighthouse&quot;.</li>
+<li><strong>Configure the test:</strong>
+<ul>
+<li><strong>Mode:</strong> Select &quot;Navigation&quot; (default).</li>
+<li><strong>Device:</strong> Select Mobile. (Google uses mobile-first indexing; if your site is fast on mobile, it is fast everywhere).</li>
+<li><strong>Categories:</strong> Ensure &quot;Performance&quot; is checked.</li>
+</ul>
+</li>
+<li><strong>Run the audit:</strong> Click the blue Analyze page load button. The browser will reload your page several times while simulating a slower network and CPU.</li>
+</ol>
+<h3>Interpreting the results for script bloat</h3>
+<p>When the report finishes, ignore the overall score for a moment and scroll down to the Diagnostics section. Look for these specific red flags related to GTM and third-party scripts:</p>
+<ul>
+<li><strong>&quot;Reduce unused JavaScript&quot;:</strong> Lighthouse will flag scripts that downloaded a lot of code but only used a tiny fraction of it. GTM containers often show up here because they contain logic for every possible tag, even ones not firing on the current page.</li>
+<li><strong>&quot;Minimize main-thread work&quot;:</strong> This is the CPU culprit. Expand this item, and you will often see expensive tasks related to script evaluation originating from GTM.</li>
+<li><strong>Total blocking time (TBT) score:</strong> Look at this metric at the top. If it is in the red (over 600ms), it means scripts are severely locking up the browser.</li>
+</ul>
+<h2>The minimalist conclusion</h2>
+<p>If you are a solo developer or part of a small engineering team, you do not need Google Tag Manager.</p>
+<p>It is an abstraction designed for organizational silos that you don't have. It trades performance for a convenience that you don't need.</p>
+<p>Stick to the essentials. Hardcode your analytics. Keep your main thread clear. Your users will thank you for the speed, and your future self will thank you for the maintainable code.</p>
+</div><footer class="mt-16 pt-8 border-t border-border"><a href="/blog/" class="text-sm font-semibold text-link underline underline-offset-4"><span aria-hidden="true">&larr;</span> Back to blog</a></footer></article></main><footer class="border-t border-border"><div class="mx-auto max-w-7xl px-6 py-16 flex items-center justify-center lg:px-8"><p class="text-center text-xs leading-5 text-gray">&copy; 2026 Maciej Adamski. All rights reserved.</p></div></footer></body></html>
