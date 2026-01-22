@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
@@ -28,10 +29,15 @@ type Config struct {
 	GoogleSearchConsole string
 	GoogleAnalyticsID   string
 	GoogleTagManagerID  string
+	GoogleTagManagerEnabled bool
 }
 
 func Load() (*Config, error) {
 	_ = godotenv.Load()
+	gtmEnabled, err := getEnvBool("GOOGLE_TAG_MANAGER_ENABLED", false)
+	if err != nil {
+		return nil, err
+	}
 	cfg := &Config{
 		Host:     getEnv("HOST", "localhost"),
 		Port:     getEnv("PORT", "3000"),
@@ -48,7 +54,8 @@ func Load() (*Config, error) {
 		TwitterHandle:       getEnv("TWITTER_HANDLE", ""),
 		GoogleSearchConsole: getEnv("GOOGLE_SEARCH_CONSOLE", ""),
 		GoogleAnalyticsID:   getEnv("GOOGLE_ANALYTICS_ID", ""),
-		GoogleTagManagerID:  getEnv("GOOGLE_TAG_MANAGER_ID", ""),
+		GoogleTagManagerID:     getEnv("GOOGLE_TAG_MANAGER_ID", ""),
+		GoogleTagManagerEnabled: gtmEnabled,
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -66,6 +73,9 @@ func (c *Config) validate() error {
 	if c.DistPath == "" {
 		return fmt.Errorf("DIST_PATH cannot be empty")
 	}
+	if c.GoogleTagManagerEnabled && c.GoogleTagManagerID == "" {
+		return fmt.Errorf("GOOGLE_TAG_MANAGER_ID cannot be empty when GOOGLE_TAG_MANAGER_ENABLED=true")
+	}
 	return nil
 }
 
@@ -74,4 +84,16 @@ func getEnv(key, fallback string) string {
 		return val
 	}
 	return fallback
+}
+
+func getEnvBool(key string, fallback bool) (bool, error) {
+	val := os.Getenv(key)
+	if val == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseBool(val)
+	if err != nil {
+		return false, fmt.Errorf("invalid %s: %w", key, err)
+	}
+	return parsed, nil
 }

@@ -35,6 +35,10 @@ type SiteConfig struct {
 }
 
 func LoadSiteConfig(cfg *config.Config) SiteConfig {
+	gtmID := ""
+	if cfg.GoogleTagManagerEnabled {
+		gtmID = cfg.GoogleTagManagerID
+	}
 	return SiteConfig{
 		URL:                       cfg.SiteURL,
 		Name:                      cfg.SiteName,
@@ -43,7 +47,7 @@ func LoadSiteConfig(cfg *config.Config) SiteConfig {
 		TwitterHandle:             cfg.TwitterHandle,
 		GoogleSearchConsoleVerify: cfg.GoogleSearchConsole,
 		GoogleAnalyticsID:         cfg.GoogleAnalyticsID,
-		GoogleTagManagerID:        cfg.GoogleTagManagerID,
+		GoogleTagManagerID:        gtmID,
 		Language:                  "en",
 		OrgLogo:                   "/static/logos/logo.svg",
 	}
