@@ -92,8 +92,8 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 						Welcome to my digital garden. 🌱
 					</p>
 					<div class="mt-10 flex flex-col items-start md:flex-row md:items-center gap-6">
-						<a href="/blog/" class="text-sm font-semibold text-link underline underline-offset-4">Read my Blog</a>
-						<a href="https://www.linkedin.com/in/maciejadamski89/" target="_blank" class="text-sm font-semibold text-link underline underline-offset-4">Connect with me on LinkedIn <span aria-hidden="true">&rarr;</span></a>
+						<a href="/blog/" class="text-base font-semibold text-link underline underline-offset-4">Read my Blog</a>
+						<a href="https://www.linkedin.com/in/maciejadamski89/" target="_blank" class="text-base font-semibold text-link underline underline-offset-4">Connect with me on LinkedIn <span aria-hidden="true">&rarr;</span></a>
 					</div>
 				</div>
 			</div>
@@ -224,6 +224,26 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 					} else {
 						<p class="text-gray">No posts yet. Check back soon!</p>
 					}
+				</div>
+			</div>
+		</section>
+		// --- CONTACT ---
+		<section id="contact" class="pt-24 pb-36 px-6">
+			<div class="max-w-3xl mx-auto">
+				<h2 class="text-xl font-bold text-white mb-6">/contact</h2>
+				<p class="text-lg text-gray mb-8 leading-relaxed">
+					I am always open to new connections and challenges. Whether you want to discuss a complex system architecture, need a partner for a new venture, or just want to chat about technology — I’m listening.
+				</p>
+				<p class="text-lg text-white font-medium mb-8">
+					Maybe it will be me that finds the right solution for you?
+				</p>
+				<div class="flex justify-start gap-4">
+					<a href="mailto:maciej.adamski@dataglit.ch" class="text-base font-semibold text-link underline underline-offset-4">
+						Email me &rarr;
+					</a>
+					<a href="https://linkedin.com/in/maciejadamski" target="_blank" class="text-base font-semibold text-link underline underline-offset-4">
+						LinkedIn &rarr;
+					</a>
 				</div>
 			</div>
 		</section>
