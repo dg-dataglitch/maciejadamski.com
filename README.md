@@ -69,6 +69,7 @@ Edit `.env`:
 SITE_NAME=My Website
 SITE_URL=https://example.com
 SITE_DESCRIPTION=My personal website
+GOOGLE_TAG_MANAGER_ENABLED=false
 GOOGLE_ANALYTICS_ID=G-XXXXXXXXXX
 ```
 
