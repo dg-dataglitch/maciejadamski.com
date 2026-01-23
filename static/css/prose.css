@@ -85,6 +85,8 @@
         border: 1px solid var(--color-border);
         color: var(--color-white);
         overflow-x: auto;
+        white-space: pre-wrap; /* Wrap text */
+        word-wrap: break-word; /* Break long words */
         padding: 1rem;
         border-radius: var(--radius-container);
         font-size: 0.875rem;
