@@ -5,7 +5,7 @@ draft: false
 description: "In a mobile-first world, hover and transition effects are mostly dead code. Why I prefer simpler Tailwind, faster pages, and better readability."
 ---
 
-## In a mobile-first world, fancy UI is just technical debt
+In a mobile-first world, fancy UI is just technical debt
 
 ## **The readability tax**
 
