@@ -133,7 +133,7 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 		// --- ABOUT SECTION ---
 		<section id="about" class="py-24 px-6">
 			<div class="max-w-3xl mx-auto">
-				<h2 class="text-xl font-bold text-white mb-8">/whoami</h2>
+				<h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>whoami<span class="text-link">_</span></h2>
 				<div class="space-y-6 text-gray">
 					<p>
 						I am a software engineer driven by curiosity. My professional world revolves around the Go and Python ecosystems,
@@ -179,7 +179,7 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 		if len(partners) > 0 {
 			<section id="partners" class="py-24 px-6">
 				<div class="max-w-3xl mx-auto">
-					<h2 class="text-xl font-bold text-white mb-8">/partners</h2>
+					<h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>business_partners<span class="text-link">_</span></h2>
 					<p class="text-gray mb-10">
 						Great work is rarely done in isolation. I am proud to collaborate with these exceptional leaders and companies who share a commitment to quality, innovation, and integrity.
 					</p>
@@ -209,7 +209,7 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 		// --- PHILOSOPHY ---
 		<section id="philosophy" class="py-24 px-6">
 			<div class="max-w-3xl mx-auto">
-				<h2 class="text-xl font-bold text-white mb-8">/coding_philosophy</h2>
+				<h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>coding_philosophy<span class="text-link">_</span></h2>
 				<div class="space-y-6 text-gray">
 					<p>
 						<span class="text-white font-semibold">Less is More.</span>
@@ -240,8 +240,8 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 		// --- TECH STACK ---
 		<section id="tech" class="py-24 px-6">
 			<div class="max-w-3xl mx-auto">
-				<h2 class="text-xl font-bold text-white mb-8">/stack</h2>
-				<p class="text-gray mb-10">
+				<h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>my_tech_stack<span class="text-link">_</span></h2>
+				<p class="text-gray text-base mb-10">
 					A snapshot of the stack I use and the tools I reach for.
 				</p>
 				<div class="space-y-8">
@@ -263,7 +263,7 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 		// --- BLOG PROMO ---
 		<section class="pt-24 pb-36 px-6">
 			<div class="max-w-3xl mx-auto">
-				<h2 class="text-xl font-bold text-white mb-8">/latest_thoughts</h2>
+				<h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>latest_thoughts<span class="text-link">_</span></h2>
 				<div class="divide-y divide-border">
 					if len(latestPosts) > 0 {
 						for _, post := range latestPosts {
@@ -298,12 +298,12 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 		// --- CONTACT ---
 		<section id="contact" class="pt-24 pb-36 px-6">
 			<div class="max-w-3xl mx-auto">
-				<h2 class="text-xl font-bold text-white mb-6">/contact</h2>
-				<p class="text-lg text-gray mb-8 leading-relaxed">
+				<h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>contact<span class="text-link">_</span></h2>
+				<p class="text-base/7 text-gray mb-8">
 					I am always open to new connections and challenges. Whether you want to discuss a complex system architecture, need a partner for a new venture, or just want to chat about technology — I’m listening.
 				</p>
-				<p class="text-lg text-white font-medium mb-8">
-					Maybe it will be me that finds the right solution for you?
+				<p class="text-base/7 text-white font-semimedium mb-8">
+					I am confident that I am the right person to help with your challenge.
 				</p>
 				<div class="flex justify-start gap-4">
 					<a href="mailto:maciej.adamski@dataglit.ch" class="text-base font-semibold text-link underline underline-offset-4">
