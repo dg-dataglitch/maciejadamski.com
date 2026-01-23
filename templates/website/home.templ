@@ -114,13 +114,13 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 						<br/>
 						<span class="text-white">I'm Maciej Adamski</span>
 					</h1>
-					<p class="mt-6 text-base leading-8 text-white">
+					<p class="mt-6 text-base/7 text-white">
 						Software Engineer. Proud Father. Lifelong Learner.
 					</p>
-					<p class="mt-4 text-base text-gray">
+					<p class="mt-4 text-base/7 text-gray">
 						I build reliable software systems and explore the ideas that make us better humans.
 					</p>
-					<p class="mt-4 text-base text-gray">
+					<p class="mt-4 text-base/7 text-gray">
 						Welcome to my digital garden. 🌱
 					</p>
 					<div class="mt-10 flex flex-col items-start md:flex-row md:items-center gap-6">
@@ -134,7 +134,7 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 		<section id="about" class="py-24 px-6">
 			<div class="max-w-3xl mx-auto">
 				<h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>whoami<span class="text-link">_</span></h2>
-				<div class="space-y-6 text-gray">
+				<div class="space-y-6 text-base/7 text-gray">
 					<p>
 						I am a software engineer driven by curiosity. My professional world revolves around the Go and Python ecosystems,
 						where I focus on backend architecture, data tooling, and pragmatic automation. I like building things that work quietly and reliably.
@@ -155,7 +155,7 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 		<section id="dataglitch" class="py-24 px-6">
 			<div class="max-w-3xl mx-auto">
 				<img src="/static/logos/dataglitch.png" alt="Dataglitch Logo" class="w-32 mb-8"/>
-				<div class="space-y-6 text-gray">
+				<div class="space-y-6 text-base/7 text-gray">
 					<p>
 						I am the founder of <span class="text-white font-semibold">Dataglitch</span>, a strategic partner for digital evolution.
 						We transform complex business challenges into cohesive, scalable software solutions.
@@ -180,7 +180,7 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 			<section id="partners" class="py-24 px-6">
 				<div class="max-w-3xl mx-auto">
 					<h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>business_partners<span class="text-link">_</span></h2>
-					<p class="text-gray mb-10">
+					<p class="text-base/7 text-gray mb-10">
 						Great work is rarely done in isolation. I am proud to collaborate with these exceptional leaders and companies who share a commitment to quality, innovation, and integrity.
 					</p>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -210,7 +210,7 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 		<section id="philosophy" class="py-24 px-6">
 			<div class="max-w-3xl mx-auto">
 				<h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>coding_philosophy<span class="text-link">_</span></h2>
-				<div class="space-y-6 text-gray">
+				<div class="space-y-6 text-base/7 text-gray">
 					<p>
 						<span class="text-white font-semibold">Less is More.</span>
 					</p>
@@ -241,7 +241,7 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 		<section id="tech" class="py-24 px-6">
 			<div class="max-w-3xl mx-auto">
 				<h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>my_tech_stack<span class="text-link">_</span></h2>
-				<p class="text-gray text-base mb-10">
+				<p class="text-gray text-base/7 mb-10">
 					A snapshot of the stack I use and the tools I reach for.
 				</p>
 				<div class="space-y-8">
@@ -272,7 +272,7 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 									<time datetime={ post.Meta.Date } class="text-gray">{ post.FormattedDate() }</time>
 								</div>
 								<div class="relative">
-									<h3 class="mt-3 text-lg font-semibold leading-6 text-white">
+									<h3 class="mt-3 text-lg/8 font-semibold text-white">
 										<a href={ templ.SafeURL("/blog/" + post.Slug + "/") } class="text-link underline underline-offset-4">
 											<span class="absolute inset-0"></span>
 											{ post.Meta.Title }
