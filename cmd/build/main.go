@@ -51,7 +51,6 @@ func latestPublishedPosts(posts []markdown.Post, limit int) []markdown.Post {
 }
 
 func main() {
-	// 1. Load configuration
 	cfg, err := config.Load()
 	if err != nil {
 		panic(err)
@@ -63,45 +62,30 @@ func main() {
 	}
 	slog.SetDefault(l)
 
-	// Build site config for templates
 	site := website.LoadSiteConfig(cfg)
-
 	l.Info("build_starting", "dist", cfg.DistPath)
-
-	// 2. Clear previous build
 	if err := os.RemoveAll(cfg.DistPath); err != nil {
 		l.Error("cleanup_failed", "err", err)
 	}
-
-	// 3. Copy static assets
 	if err := copyDir(cfg.StaticPath, filepath.Join(cfg.DistPath, "static")); err != nil {
 		l.Error("static_copy_failed", "err", err)
 	}
-
-	// 4. Process blog posts
 	postsDir := filepath.Join(cfg.ContentPath, "posts")
 	posts, err := markdown.ParseDir(postsDir)
 	if err != nil {
 		l.Warn("blog_load_failed", "err", err)
 		posts = []markdown.Post{}
 	}
-
-	// Filter published posts
 	var publishedPosts []markdown.Post
 	for _, p := range posts {
 		if p.Meta.Published {
 			publishedPosts = append(publishedPosts, p)
 		}
 	}
-
-	// Sort posts by date (newest first)
 	sort.SliceStable(publishedPosts, func(i, j int) bool {
 		return parsePostDate(publishedPosts[i].Meta.Date).After(parsePostDate(publishedPosts[j].Meta.Date))
 	})
-
 	latestPosts := latestPublishedPosts(publishedPosts, 3)
-
-	// 5. Generate static pages
 	homeSEO := website.SEO{
 		Title:       site.Name + " - " + site.Description,
 		Description: site.Description,
@@ -113,8 +97,6 @@ func main() {
 	} else {
 		l.Info("page_generated", "path", "index.html")
 	}
-
-	// Render blog index
 	indexSEO := website.SEO{
 		Title:       "Blog | " + site.Name,
 		Description: "Latest articles and insights from " + site.Name,
@@ -126,8 +108,6 @@ func main() {
 	} else {
 		l.Info("page_generated", "path", "blog/index.html")
 	}
-
-	// Render individual posts
 	for _, post := range publishedPosts {
 		postSEO := website.SEO{
 			Title:       post.Meta.Title + " | " + site.Name,
@@ -143,13 +123,8 @@ func main() {
 			l.Info("post_generated", "slug", post.Slug)
 		}
 	}
-
-	// 6. Generate sitemap.xml
 	generateSitemap(cfg.DistPath, cfg.StaticPath, site.URL, publishedPosts, l)
-
-	// 7. Generate robots.txt
 	generateRobots(cfg.DistPath, cfg.StaticPath, site.URL, l)
-
 	l.Info("build_complete", "pages", 2, "posts", len(publishedPosts))
 }
 
@@ -159,45 +134,34 @@ func copyDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
-
 		relPath, err := filepath.Rel(src, path)
 		if err != nil {
 			return err
 		}
-
-		// Skip scss source folder and other build artifacts
 		if info.IsDir() && info.Name() == "scss" {
 			return filepath.SkipDir
 		}
-
-		// Skip template files and source maps
 		ext := filepath.Ext(path)
 		if ext == ".tmpl" || ext == ".map" || ext == ".scss" {
 			return nil
 		}
-
 		dstPath := filepath.Join(dst, relPath)
-
 		if info.IsDir() {
 			return os.MkdirAll(dstPath, 0755)
 		}
-
 		srcFile, err := os.Open(path)
 		if err != nil {
 			return err
 		}
 		defer srcFile.Close()
-
 		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
 			return err
 		}
-
 		dstFile, err := os.Create(dstPath)
 		if err != nil {
 			return err
 		}
 		defer dstFile.Close()
-
 		_, err = io.Copy(dstFile, srcFile)
 		return err
 	})
@@ -210,7 +174,6 @@ func generateSitemap(distPath, staticPath, siteURL string, posts []markdown.Post
 		l.Error("sitemap_template_failed", "err", err)
 		return
 	}
-
 	data := struct {
 		SiteURL string
 		Posts   []markdown.Post
@@ -218,7 +181,6 @@ func generateSitemap(distPath, staticPath, siteURL string, posts []markdown.Post
 		SiteURL: siteURL,
 		Posts:   posts,
 	}
-
 	outPath := filepath.Join(distPath, "sitemap.xml")
 	f, err := os.Create(outPath)
 	if err != nil {
@@ -226,7 +188,6 @@ func generateSitemap(distPath, staticPath, siteURL string, posts []markdown.Post
 		return
 	}
 	defer f.Close()
-
 	if err := tmpl.Execute(f, data); err != nil {
 		l.Error("sitemap_execute_failed", "err", err)
 	} else {
@@ -241,13 +202,11 @@ func generateRobots(distPath, staticPath, siteURL string, l *slog.Logger) {
 		l.Error("robots_template_failed", "err", err)
 		return
 	}
-
 	data := struct {
 		SiteURL string
 	}{
 		SiteURL: siteURL,
 	}
-
 	outPath := filepath.Join(distPath, "robots.txt")
 	f, err := os.Create(outPath)
 	if err != nil {
@@ -255,7 +214,6 @@ func generateRobots(distPath, staticPath, siteURL string, l *slog.Logger) {
 		return
 	}
 	defer f.Close()
-
 	if err := tmpl.Execute(f, data); err != nil {
 		l.Error("robots_execute_failed", "err", err)
 	} else {
