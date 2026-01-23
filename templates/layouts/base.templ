@@ -153,16 +153,32 @@ templ Base(site website.SiteConfig, seo website.SEO, currentPath string) {
 			<!-- Tailwind CSS -->
 			<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 			<script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script>
+			<style>
+				:root {
+					--font-sans: 'JetBrains Mono', monospace;
+					--font-mono: 'JetBrains Mono', monospace;
+					--color-white: #e4e4e5;
+					--color-white-pure: #ffffff;
+					--color-gray: #909093;
+					--color-link: #b2c3ff;
+					--color-surface: #343438;
+					--color-page-background: #1c1c1d;
+					--color-border: #39393b;
+					--color-border-dark: #333333;
+					--color-scrollbar: #555555;
+					--radius-container: 12px;
+				}
+			</style>
 			<style type="text/tailwindcss">
 				@theme {
-						--font-sans: 'JetBrains Mono', monospace;
-						--font-mono: 'JetBrains Mono', monospace;
-						--color-white: #e4e4e5;
-						--color-gray: #909093;
-						--color-link: #b2c3ff;
-						--color-surface: #343438;
-						--color-border: #39393b;
-						--color-page-background: #1c1c1d;
+						--font-sans: var(--font-sans);
+						--font-mono: var(--font-mono);
+						--color-white: var(--color-white);
+						--color-gray: var(--color-gray);
+						--color-link: var(--color-link);
+						--color-surface: var(--color-surface);
+						--color-page-background: var(--color-page-background);
+						--color-border: var(--color-border);
 				}
 			</style>
 			<!-- Analytics -->

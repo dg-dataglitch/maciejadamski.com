@@ -1,15 +1,13 @@
 /* Prose styles for markdown content with strict B&W minimalism */
 .prose {
-        color: #909093;
-        /* Muted text */
+        color: var(--color-gray);
         line-height: 1.75;
         max-width: 48rem;
-        font-family: "JetBrains Mono", monospace;
-        /* Ensure font is inherited or explicit */
+        font-family: var(--font-mono);
 }
 
 .prose a {
-        color: #b2c3ff;
+        color: var(--color-link);
         text-decoration: underline;
 }
 
@@ -19,15 +17,14 @@
 .prose h4,
 .prose h5,
 .prose h6 {
-        color: #e4e4e5;
+        color: var(--color-white);
         font-weight: 700;
         line-height: 1.3;
 }
 
 .prose strong {
-        color: #ffffff;
+        color: var(--color-white-pure);
         font-weight: 800;
-        /* Extra bold for emphasis */
 }
 
 .prose h1 {
@@ -41,8 +38,7 @@
         margin-top: 3.5rem;
         margin-bottom: 1.5rem;
         padding-bottom: 0.5rem;
-        border-bottom: 1px solid #39393b;
-        /* Dark gray border */
+        border-bottom: 1px solid var(--color-border);
 }
 
 .prose h3 {
@@ -69,40 +65,38 @@
         padding-left: 1.625rem;
 }
 
-.prose ul>li,
-.prose ol>li {
+.prose ul > li,
+.prose ol > li {
         margin-top: 0.75rem;
         margin-bottom: 0.75rem;
         padding-left: 0.375rem;
 }
 
-.prose ul>li::marker {
-        color: #909093;
+.prose ul > li::marker {
+        color: var(--color-gray);
 }
 
-.prose ol>li::marker {
-        color: #909093;
+.prose ol > li::marker {
+        color: var(--color-gray);
 }
 
 .prose pre {
-        background-color: #343438;
-        /* Surface color */
-        border: 1px solid #39393b;
-        /* Border color */
-        color: #e4e4e5;
+        background-color: var(--color-surface);
+        border: 1px solid var(--color-border);
+        color: var(--color-white);
         overflow-x: auto;
         padding: 1rem;
-        border-radius: 12px;
-        /* Rounded corners */
+        border-radius: var(--radius-container);
         font-size: 0.875rem;
         line-height: 1.7142857;
         margin-top: 1.7142857em;
-
         margin-bottom: 1.7142857em;
+        scrollbar-width: thin;
+        scrollbar-color: var(--color-scrollbar) transparent;
 }
 
 .prose code {
-        color: #fff;
+        color: var(--color-white-pure);
         font-weight: 600;
         font-size: 0.875em;
 }
@@ -122,5 +116,19 @@
 .prose hr {
         margin-top: 3em;
         margin-bottom: 3em;
-        border-color: #333;
+        border-color: var(--color-border-dark);
+}
+
+/* Webkit scrollbar customization */
+.prose pre::-webkit-scrollbar {
+        height: 6px;
+}
+
+.prose pre::-webkit-scrollbar-track {
+        background: transparent;
+}
+
+.prose pre::-webkit-scrollbar-thumb {
+        background-color: var(--color-scrollbar);
+        border-radius: 3px;
 }
