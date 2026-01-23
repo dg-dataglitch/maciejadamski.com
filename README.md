@@ -28,6 +28,9 @@ go mod download
 # Setup environment
 cp .env.example .env
 
+# Install git hooks (required for auto-building dist on commit)
+make setup
+
 # Run dev server (auto rebuild)
 make dev
 ```
@@ -57,7 +60,7 @@ Open the Network URL on your phone (same WiFi) to test mobile directly.
 │   ├── website/      # Homepage
 │   └── blog/         # Blog templates
 ├── static/           # Static assets (CSS, icons, robots/sitemap templates)
-├── dist/             # Generated output (gitignored)
+├── dist/             # Generated output (committed to repo)
 └── .env              # Configuration
 ```
 
