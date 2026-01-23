@@ -16,6 +16,14 @@ type TechItem struct {
 	URL  string
 }
 
+type Partner struct {
+	Name        string
+	Role        string
+	LinkedInURL string
+	CompanyName string
+	CompanyURL  string
+}
+
 var techStackCore = []TechCategory{
 	{
 		Title: "Frontend",
@@ -71,6 +79,30 @@ var techStackCore = []TechCategory{
 	},
 }
 
+var partners = []Partner{
+	{
+		Name:        "Johnsey Kivoto",
+		Role:        "CEO",
+		LinkedInURL: "https://www.linkedin.com/in/kivotoj/",
+		CompanyName: "Defend Technologies",
+		CompanyURL:  "https://www.linkedin.com/company/defend-technologies/",
+	},
+	{
+		Name:        "David Kimutai",
+		Role:        "Co-CEO",
+		LinkedInURL: "https://www.linkedin.com/in/kipdavids/",
+		CompanyName: "BINI",
+		CompanyURL:  "",
+	},
+	{
+		Name:        "Martin Kavili",
+		Role:        "Co-CEO",
+		LinkedInURL: "https://www.linkedin.com/in/mkavili/",
+		CompanyName: "BINI",
+		CompanyURL:  "",
+	},
+}
+
 templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post) {
 	@layouts.Base(site, seo, "/") {
 		// --- HERO SECTION ---
@@ -122,7 +154,7 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 		// --- DATAGLITCH SECTION ---
 		<section id="dataglitch" class="py-24 px-6">
 			<div class="max-w-3xl mx-auto">
-				<h2 class="text-xl font-bold text-white mb-8">/dataglitch</h2>
+				<img src="/static/logos/dataglitch.png" alt="Dataglitch Logo" class="w-32 mb-8"/>
 				<div class="space-y-6 text-gray">
 					<p>
 						I am the founder of <span class="text-white font-semibold">Dataglitch</span>, a strategic partner for digital evolution.
@@ -136,13 +168,44 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 						Whether you need to launch a vision faster with an MVP, transform data into your most valuable asset, or build on a rock-solid foundation, we are the partner you can trust.
 					</p>
 					<div class="mt-4">
-						<a href="https://dataglit.ch/" target="_blank" class="text-sm font-semibold text-link underline underline-offset-4">
+						<a href="https://dataglit.ch/" target="_blank" class="text-base font-semibold text-link underline underline-offset-4">
 							Visit Dataglitch <span aria-hidden="true">&rarr;</span>
 						</a>
 					</div>
 				</div>
 			</div>
 		</section>
+		// --- PARTNERS SECTION ---
+		if len(partners) > 0 {
+			<section id="partners" class="py-24 px-6">
+				<div class="max-w-3xl mx-auto">
+					<h2 class="text-xl font-bold text-white mb-8">/partners</h2>
+					<p class="text-gray mb-10">
+						Great work is rarely done in isolation. I am proud to collaborate with these exceptional leaders and companies who share a commitment to quality, innovation, and integrity.
+					</p>
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+						for _, partner := range partners {
+							<div class="p-6 border border-border rounded-lg bg-surface/50">
+								<h3 class="text-lg font-semibold text-white">{ partner.Name }</h3>
+								<p class="text-sm text-gray mb-4">
+									{ partner.Role } at
+									if partner.CompanyURL != "" {
+										<a href={ templ.SafeURL(partner.CompanyURL) } target="_blank" class="text-link hover:underline">{ partner.CompanyName }</a>
+									} else {
+										<span>{ partner.CompanyName }</span>
+									}
+								</p>
+								<div class="mt-auto">
+									<a href={ templ.SafeURL(partner.LinkedInURL) } target="_blank" class="text-sm font-semibold text-link underline underline-offset-4">
+										LinkedIn Profile <span aria-hidden="true">&rarr;</span>
+									</a>
+								</div>
+							</div>
+						}
+					</div>
+				</div>
+			</section>
+		}
 		// --- PHILOSOPHY ---
 		<section id="philosophy" class="py-24 px-6">
 			<div class="max-w-3xl mx-auto">
@@ -216,7 +279,7 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 										</a>
 									</h3>
 									if post.Meta.Description != "" {
-										<p class="mt-5 line-clamp-3 text-base/7 text-white">{ post.Meta.Description }</p>
+										<p class="mt-5 line-clamp-3 text-base/7 text-gray">{ post.Meta.Description }</p>
 									}
 								</div>
 							</article>
