@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 
 	"rkb/pkg/config"
 	"rkb/pkg/logger"
@@ -22,16 +21,6 @@ func main() {
 		l, _ = logger.New("info")
 	}
 	slog.SetDefault(l)
-
-	// Run the build first
-	l.Info("dev_server_starting", "running", "build")
-	buildCmd := exec.Command("go", "run", "./cmd/build")
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-	if err := buildCmd.Run(); err != nil {
-		l.Error("build_failed", "err", err)
-		os.Exit(1)
-	}
 
 	// Serve the dist directory
 	addr := cfg.Addr()
