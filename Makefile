@@ -6,6 +6,10 @@ help: ## Display this help screen
 templ: ## Generate templ templates
 	@templ generate
 
+.PHONY: fmt
+fmt: ## Format templ templates
+	@templ fmt .
+
 .PHONY: build
 build: templ ## Generate static site
 	@echo "> Cleaning dist..."
@@ -20,10 +24,6 @@ dev: ## Run development server with hot reload
 	@echo "> Local:   http://localhost:3000"
 	@echo "> Network: http://$$(hostname -I | awk '{print $$1}'):3000"
 	@air
-
-.PHONY: css
-css: ## Compile Bootstrap SCSS (only needed for UI_FRAMEWORK=bootstrap)
-	@npm run css:build
 
 .PHONY: clean
 clean: ## Clean build artifacts
