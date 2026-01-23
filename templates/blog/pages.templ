@@ -11,7 +11,7 @@ templ Index(site website.SiteConfig, seo website.SEO, posts []markdown.Post) {
 		<div class="max-w-3xl mx-auto px-6 py-24">
 			<div class="mb-16 border-b border-border pb-12">
 				<h1 class="text-4xl font-semibold tracking-tight leading-tight mb-4">Blog</h1>
-				<p class="text-gray">Thoughts, ideas, and tutorials</p>
+				<p class="text-base/7 text-gray">Thoughts, ideas, and tutorials</p>
 			</div>
 			<div class="flex flex-col gap-12">
 				for _, post := range posts {
@@ -32,7 +32,7 @@ templ Index(site website.SiteConfig, seo website.SEO, posts []markdown.Post) {
 			</div>
 			if len(posts) == 0 {
 				<div class="text-center py-16">
-					<p class="text-gray">No posts yet. Check back soon!</p>
+					<p class="text-base/7 text-gray">No posts yet. Check back soon!</p>
 				</div>
 			}
 		</div>
