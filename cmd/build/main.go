@@ -63,6 +63,8 @@ func main() {
 	slog.SetDefault(l)
 
 	site := website.LoadSiteConfig(cfg)
+	l.Debug("config_loaded", "log_level", cfg.LogLevel, "dist", cfg.DistPath, "static", cfg.StaticPath)
+	l.Debug("site_config_loaded", "name", site.Name, "url", site.URL)
 	l.Info("build_starting", "dist", cfg.DistPath)
 	if err := os.RemoveAll(cfg.DistPath); err != nil {
 		l.Error("cleanup_failed", "err", err)
@@ -80,8 +82,11 @@ func main() {
 	for _, p := range posts {
 		if p.Meta.Published {
 			publishedPosts = append(publishedPosts, p)
+		} else {
+			l.Debug("post_skipped_unpublished", "slug", p.Slug)
 		}
 	}
+	l.Debug("posts_filtered", "total", len(posts), "published", len(publishedPosts))
 	sort.SliceStable(publishedPosts, func(i, j int) bool {
 		return parsePostDate(publishedPosts[i].Meta.Date).After(parsePostDate(publishedPosts[j].Meta.Date))
 	})
@@ -91,6 +96,7 @@ func main() {
 		Description: site.Description,
 		Image:       site.DefaultImage,
 	}
+	l.Debug("rendering_home_page", "seo_title", homeSEO.Title)
 	homePath := filepath.Join(cfg.DistPath, "index.html")
 	if err := generator.RenderTemplComponent(homePath, webTemplates.Home(site, homeSEO, latestPosts)); err != nil {
 		l.Error("home_render_failed", "err", err)

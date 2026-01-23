@@ -3,6 +3,7 @@ package markdown
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,7 @@ func (p Post) FormattedDate() string {
 
 // ParseFile reads a markdown file and extracts frontmatter and content.
 func ParseFile(path string) (*Post, error) {
+	slog.Debug("parsing_markdown_file", "path", path)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading file %s: %w", path, err)
@@ -63,6 +65,7 @@ func ParseFile(path string) (*Post, error) {
 
 	metaData := meta.Get(ctx)
 	postMeta := extractMeta(metaData, path)
+	slog.Debug("extracted_meta", "path", path, "title", postMeta.Title, "slug", postMeta.Slug, "published", postMeta.Published)
 
 	return &Post{
 		Meta:    postMeta,
@@ -87,12 +90,14 @@ func ParseDir(dir string) ([]Post, error) {
 
 		post, err := ParseFile(filepath.Join(dir, entry.Name()))
 		if err != nil {
+			slog.Warn("parsing_file_failed", "file", entry.Name(), "err", err)
 			continue // Skip files that can't be parsed
 		}
 
 		posts = append(posts, *post)
 	}
 
+	slog.Info("parsed_directory", "dir", dir, "count", len(posts))
 	return posts, nil
 }
 

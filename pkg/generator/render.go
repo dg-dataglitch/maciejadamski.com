@@ -11,6 +11,7 @@ import (
 )
 
 func RenderTemplComponent(path string, component templ.Component) error {
+	slog.Debug("rendering_component", "path", path)
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creation directory failed %s: %w", dir, err)
