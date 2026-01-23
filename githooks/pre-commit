@@ -1,0 +1,19 @@
+#!/bin/sh
+
+echo "------------------------------------------------"
+echo "Running pre-commit hook: make build"
+echo "------------------------------------------------"
+
+# Run the build
+make build
+
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "[FAIL] Build failed! Commit aborted."
+    exit 1
+fi
+
+# Stage the artifacts so they are included in the commit
+git add dist
+
+echo "[OK] Build successful. 'dist' folder staged."
