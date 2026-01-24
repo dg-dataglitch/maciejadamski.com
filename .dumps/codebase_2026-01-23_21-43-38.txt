@@ -1,0 +1,3389 @@
+==================================================
+FILE: website/.air.toml
+==================================================
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "templ fmt . && templ generate && go run ./cmd/build"
+  bin = "./tmp/dev-server"
+  full_bin = "go run ./cmd/dev"
+  include_ext = ["go", "templ", "md", "css"]
+  exclude_dir = ["tmp", "vendor", "dist", ".git"]
+  include_dir = []
+  exclude_file = []
+  exclude_regex = ["_templ\\.go$"]
+  delay = 1000
+  stop_on_error = false
+  log = "build-errors.log"
+  rerun = false
+  rerun_delay = 500
+  send_interrupt = true
+  kill_delay = 500
+
+[log]
+  time = false
+  main_only = true
+
+[color]
+  main = "magenta"
+  watcher = "cyan"
+  build = "yellow"
+  runner = "green"
+
+[misc]
+  clean_on_exit = true
+
+
+==================================================
+FILE: website/cmd/build/main.go
+==================================================
+package main
+
+import (
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"sort"
+	"text/template"
+	"time"
+
+	"rkb/pkg/config"
+	"rkb/pkg/generator"
+	"rkb/pkg/logger"
+	"rkb/pkg/markdown"
+	"rkb/pkg/website"
+	blogTemplates "rkb/templates/blog"
+	webTemplates "rkb/templates/website"
+)
+
+func parsePostDate(date string) time.Time {
+	if date == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339, date)
+	if err == nil {
+		return parsed
+	}
+	parsed, err = time.Parse("2006-01-02", date)
+	if err == nil {
+		return parsed
+	}
+	return time.Time{}
+}
+
+func latestPublishedPosts(posts []markdown.Post, limit int) []markdown.Post {
+	if limit <= 0 {
+		return []markdown.Post{}
+	}
+	sorted := make([]markdown.Post, 0, len(posts))
+	for _, post := range posts {
+		sorted = append(sorted, post)
+	}
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return parsePostDate(sorted[i].Meta.Date).After(parsePostDate(sorted[j].Meta.Date))
+	})
+	if len(sorted) > limit {
+		sorted = sorted[:limit]
+	}
+	return sorted
+}
+
+func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		panic(err)
+	}
+
+	l, err := logger.New(cfg.LogLevel)
+	if err != nil {
+		l, _ = logger.New("info")
+	}
+	slog.SetDefault(l)
+
+	site := website.LoadSiteConfig(cfg)
+	l.Debug("config_loaded", "log_level", cfg.LogLevel, "dist", cfg.DistPath, "static", cfg.StaticPath)
+	l.Debug("site_config_loaded", "name", site.Name, "url", site.URL)
+	l.Info("build_starting", "dist", cfg.DistPath)
+	if err := os.RemoveAll(cfg.DistPath); err != nil {
+		l.Error("cleanup_failed", "err", err)
+	}
+	if err := copyDir(cfg.StaticPath, filepath.Join(cfg.DistPath, "static")); err != nil {
+		l.Error("static_copy_failed", "err", err)
+	}
+	postsDir := filepath.Join(cfg.ContentPath, "posts")
+	posts, err := markdown.ParseDir(postsDir)
+	if err != nil {
+		l.Warn("blog_load_failed", "err", err)
+		posts = []markdown.Post{}
+	}
+	var publishedPosts []markdown.Post
+	for _, p := range posts {
+		if p.Meta.Published {
+			publishedPosts = append(publishedPosts, p)
+		} else {
+			l.Debug("post_skipped_unpublished", "slug", p.Slug)
+		}
+	}
+	l.Debug("posts_filtered", "total", len(posts), "published", len(publishedPosts))
+	sort.SliceStable(publishedPosts, func(i, j int) bool {
+		return parsePostDate(publishedPosts[i].Meta.Date).After(parsePostDate(publishedPosts[j].Meta.Date))
+	})
+	latestPosts := latestPublishedPosts(publishedPosts, 3)
+	homeSEO := website.SEO{
+		Title:       site.Name + " - " + site.Description,
+		Description: site.Description,
+		Image:       site.DefaultImage,
+	}
+	l.Debug("rendering_home_page", "seo_title", homeSEO.Title)
+	homePath := filepath.Join(cfg.DistPath, "index.html")
+	if err := generator.RenderTemplComponent(homePath, webTemplates.Home(site, homeSEO, latestPosts)); err != nil {
+		l.Error("home_render_failed", "err", err)
+	} else {
+		l.Info("page_generated", "path", "index.html")
+	}
+	indexSEO := website.SEO{
+		Title:       "Blog | " + site.Name,
+		Description: "Latest articles and insights from " + site.Name,
+		Image:       site.DefaultImage,
+	}
+	indexPath := filepath.Join(cfg.DistPath, "blog", "index.html")
+	if err := generator.RenderTemplComponent(indexPath, blogTemplates.Index(site, indexSEO, publishedPosts)); err != nil {
+		l.Error("blog_index_failed", "err", err)
+	} else {
+		l.Info("page_generated", "path", "blog/index.html")
+	}
+	for _, post := range publishedPosts {
+		postSEO := website.SEO{
+			Title:       post.Meta.Title + " | " + site.Name,
+			Description: post.Meta.Description,
+			Type:        "article",
+			PublishedAt: post.Meta.Date,
+			Image:       site.DefaultImage,
+		}
+		postPath := filepath.Join(cfg.DistPath, "blog", post.Slug, "index.html")
+		if err := generator.RenderTemplComponent(postPath, blogTemplates.PostPage(site, postSEO, post)); err != nil {
+			l.Error("post_render_failed", "slug", post.Slug, "err", err)
+		} else {
+			l.Info("post_generated", "slug", post.Slug)
+		}
+	}
+	generateSitemap(cfg.DistPath, cfg.StaticPath, site.URL, publishedPosts, l)
+	generateRobots(cfg.DistPath, cfg.StaticPath, site.URL, l)
+	l.Info("build_complete", "pages", 2, "posts", len(publishedPosts))
+}
+
+// copyDir recursively copies a directory tree, excluding source files.
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if info.IsDir() && info.Name() == "scss" {
+			return filepath.SkipDir
+		}
+		ext := filepath.Ext(path)
+		if ext == ".tmpl" || ext == ".map" || ext == ".scss" {
+			return nil
+		}
+		dstPath := filepath.Join(dst, relPath)
+		if info.IsDir() {
+			return os.MkdirAll(dstPath, 0755)
+		}
+		srcFile, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer srcFile.Close()
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+			return err
+		}
+		dstFile, err := os.Create(dstPath)
+		if err != nil {
+			return err
+		}
+		defer dstFile.Close()
+		_, err = io.Copy(dstFile, srcFile)
+		return err
+	})
+}
+
+func generateSitemap(distPath, staticPath, siteURL string, posts []markdown.Post, l *slog.Logger) {
+	tmplPath := filepath.Join(staticPath, "sitemap.xml.tmpl")
+	tmpl, err := template.ParseFiles(tmplPath)
+	if err != nil {
+		l.Error("sitemap_template_failed", "err", err)
+		return
+	}
+	data := struct {
+		SiteURL string
+		Posts   []markdown.Post
+	}{
+		SiteURL: siteURL,
+		Posts:   posts,
+	}
+	outPath := filepath.Join(distPath, "sitemap.xml")
+	f, err := os.Create(outPath)
+	if err != nil {
+		l.Error("sitemap_create_failed", "err", err)
+		return
+	}
+	defer f.Close()
+	if err := tmpl.Execute(f, data); err != nil {
+		l.Error("sitemap_execute_failed", "err", err)
+	} else {
+		l.Info("sitemap_generated")
+	}
+}
+
+func generateRobots(distPath, staticPath, siteURL string, l *slog.Logger) {
+	tmplPath := filepath.Join(staticPath, "robots.txt.tmpl")
+	tmpl, err := template.ParseFiles(tmplPath)
+	if err != nil {
+		l.Error("robots_template_failed", "err", err)
+		return
+	}
+	data := struct {
+		SiteURL string
+	}{
+		SiteURL: siteURL,
+	}
+	outPath := filepath.Join(distPath, "robots.txt")
+	f, err := os.Create(outPath)
+	if err != nil {
+		l.Error("robots_create_failed", "err", err)
+		return
+	}
+	defer f.Close()
+	if err := tmpl.Execute(f, data); err != nil {
+		l.Error("robots_execute_failed", "err", err)
+	} else {
+		l.Info("robots_generated")
+	}
+}
+
+
+==================================================
+FILE: website/cmd/dev/main.go
+==================================================
+package main
+
+import (
+	"log/slog"
+	"net/http"
+	"os"
+	"os/exec"
+
+	"rkb/pkg/config"
+	"rkb/pkg/logger"
+)
+
+func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		panic(err)
+	}
+	l, err := logger.New(cfg.LogLevel)
+	if err != nil {
+		l, _ = logger.New("info")
+	}
+	slog.SetDefault(l)
+	l.Info("dev_server_starting", "running", "build")
+	buildCmd := exec.Command("go", "run", "./cmd/build")
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		l.Error("build_failed", "err", err)
+		os.Exit(1)
+	}
+	addr := cfg.Addr()
+	l.Info("dev_server_listening", "addr", "http://"+addr)
+	fs := http.FileServer(http.Dir(cfg.DistPath))
+	http.Handle("/", fs)
+	if err := http.ListenAndServe(addr, nil); err != nil {
+		l.Error("server_failed", "err", err)
+		os.Exit(1)
+	}
+}
+
+
+==================================================
+FILE: website/content/posts/cleaning-digital-attic-cloudflare-pages.md
+==================================================
+---
+title: "Cleaning the digital attic; automating Cloudflare Pages with Go"
+date: "2026-01-21"
+draft: false
+description: "A concurrency-first Go utility to clean up old Cloudflare Pages deployments safely and fast."
+---
+
+In modern web development, "set it and forget it" is a lie. I ran into a different kind of mess while cleaning up my Cloudflare organization. I could not delete unused Cloudflare Workers for my websites because there were hundreds of old Cloudflare Pages deployments tied to those previews. Every branch, every preview, and every minor tweak was living forever in the Cloudflare cloud.
+
+Cloudflare is generous, but thousands of dead deployments make the UI hard to navigate and clutter the project history. I needed a way to wipe the old deployments while keeping production safe and untouched.
+
+## The problem: manual cleanup doesn't scale
+
+Cloudflare's dashboard is fine for a few deployments, but manually clicking "Delete" on hundreds is not a task for an engineer. In my case I had more than 400 deployments, and deleting them by hand would take a lot of time. I needed a tool that was:
+
+- **Fast** > It should handle deletions in parallel.
+- **Safe** > It must never, under any circumstances, delete the active production site.
+- **Simple** > No heavy dependencies. Just a single binary I can run from my terminal.
+
+## The solution: a concurrency-first Go utility
+
+I chose Go for this task because of its first-class support for concurrency and its clear, practical approach to systems tooling.
+
+### 1. The "bouncer" pattern (semaphores)
+
+When hitting an API, you cannot just fire off 1,000 requests at once. You will hit rate limits or exhaust your local network sockets. I implemented a semaphore pattern using Go channels.
+
+By using a buffered channel, I created a "bouncer" that only allows 15 workers into the "club" at any given time. This keeps the execution fast but respectful of Cloudflare's API limits.
+
+### 2. Failing fast and being "production-aware"
+
+The most dangerous part of an automated deletion script is the risk of deleting the live site. I designed the filtering logic to be strictly production-aware.
+
+Before the script even attempts a deletion, it inspects the deployment metadata. If the environment is marked as production, the script skips it entirely. Even if that check fails, I added a secondary layer: the script parses the raw JSON error bodies from Cloudflare. When we hit the specific error `8000034` ("Cannot delete active production"), the script handles it gracefully instead of crashing.
+
+### 3. The "maintainless" workflow
+
+Following the KISS (Keep It Simple, Stupid) principle, I wrapped the entire logic in a Makefile. I do not want to remember complex CLI flags or environment variable exports.
+
+- `make run`: Cleans up the default project.
+- `make nuke project_name=xxx`: Targets a specific site.
+
+This local-first approach ensures I can verify the cleanup on my machine before even thinking about putting it into a CI/CD pipeline.
+
+## Engineering lessons learned
+
+- **Simple is not easy** > Writing a script that does not get stuck in an infinite loop when it hits a protected resource takes more thought than just a basic for loop.
+- **Stream the data** > Using `json.NewDecoder` allowed the script to handle large batches of deployment data without spiking memory usage.
+- **Secrets belong in the environment** > Using `.env` files and `os.Getenv` kept my API tokens safe and out of the source code.
+
+## Check out the code
+
+You can find the full source code, the Makefile, and the documentation on my GitHub: <https://github.com/dg-dataglitch/cloudflare-pages-cleanup>
+
+
+==================================================
+FILE: website/content/posts/middleman-tax-ditch-google-tag-manager.md
+==================================================
+---
+title: "Why developers should ditch Google Tag Manager"
+date: "2026-01-22"
+draft: false
+description: "In modern web development, there is a constant tension between marketing agility and engineering reality. GTM is often a Trojan horse. Here is why you should cut out the middleman."
+---
+
+In modern web development, there is a constant tension between marketing agility and engineering reality.
+
+Marketing teams want to deploy tracking pixels, A/B testing scripts, and chat widgets instantly without waiting for a two-week engineering sprint cycle. Engineers want a clean codebase, fast load times, and version control over everything that runs in the user's browser.
+
+Google Tag Manager (GTM) was invented to solve this tension. It promised a demilitarized zone; a dashboard where marketers could inject scripts without touching the source code.
+
+It sounds like a win-win. But if you care about performance, simplicity, and maintaining control over your application, GTM is often a Trojan horse.
+
+As engineers, it is time we treated GTM for what it is; an unnecessary abstraction layer that introduces latency and technical debt.
+
+Here is the developer’s perspective on why you should cut out the middleman, which tools you actually need, and how to prove the performance cost yourself.
+
+## The high cost of "convenience"
+
+My engineering philosophy is built on a simple premise; less is more. Every line of code is a liability. Every external dependency is a potential point of failure or friction.
+
+Google Tag Manager violates this principle by design. It is a container script whose sole purpose is to inject other scripts.
+
+### The technical problem -> the JavaScript waterfall
+
+When you install GTM, you aren't just adding one script to your `<head>`. You are adding a gatekeeper.
+
+Here is what happens in the browser network waterfall when a user visits a site using GTM:
+
+1. **The browser downloads `gtm.js`:** This library is hefty because it contains the logic to parse rules, triggers, and variables.
+2. **Execution & parsing:** The browser’s main thread, the same thread responsible for responding to user clicks and scrolling, must pause to execute this library. It has to figure out "What page am I on? What rules apply here?".
+3. **Injection waterfall:** Once GTM figures out what to do, it starts injecting other tags. It might inject Google Analytics (`gtag.js`), then a Facebook Pixel, then a LinkedIn Insight tag.
+
+This is the "middleman tax".
+
+Instead of the browser just downloading Google Analytics directly (a single request), it has to download the manager, run the manager, and then download analytics.
+
+## The performance impact -> total blocking time (TBT)
+
+The real killer isn't just the network request; it is the CPU usage.
+
+JavaScript is single-threaded. When GTM is busy evaluating dozens of triggers to decide if it should fire a "Scroll Depth" event, the main thread is blocked.
+
+If a user tries to click a button or open a menu while GTM is thinking, the site will feel sluggish or unresponsive. In performance metrics, this increases total blocking time (TBT); a metric which directly hurts your Core Web Vitals and, consequently, user experience and SEO.
+
+## The philosophy problem -> loss of control
+
+As a backend engineer, I want source control for everything. If a piece of logic changes how my application behaves, I want to see that change in a Git commit diff.
+
+GTM hides critical application logic inside a proprietary Google dashboard. If your site suddenly slows down, you can’t `git blame` to see who added a massive 5MB unoptimized Hotjar recording script. You have to log into GTM, dig through version history, and decipher what happened.
+
+If you are the engineer responsible for the site, you should control the code that runs on it.
+
+## The essentials -> what you actually need
+
+Ditching GTM does not mean flying blind. Data is crucial. But we need to distinguish between essential telemetry and bloated tag management.
+
+There are two Google tools that are non-negotiable for any serious website.
+
+### 1. Google Search Console (the external health check)
+
+**What it is:** This is the interface between you and the Googlebot crawler.
+**Why you need it:** It tells you if Google can find and understand your site. You use it to submit your `sitemap.xml` (which you should generate via code in your backend). It alerts you to critical indexing errors or security issues.
+**Performance cost:** Zero. It runs on Google's servers, not your user's browser.
+
+### 2. Google Analytics 4 (the internal telemetry)
+
+**What it is:** The record of user behavior on your site.
+**Why you need it:** To know if anyone is actually reading what you write.
+**How to implement it:** Hardcode the lightweight `gtag.js` snippet directly into your main layout template (e.g., your base `templ` file in Go).
+
+By hardcoding GA4, you ensure it loads as fast as possible, it is version-controlled in Git, and you aren't loading the entire GTM library just to fire a simple pageview event.
+
+## The diagnosis -> how to audit your site with Lighthouse
+
+You don't have to take my word for it. You can see the impact of scripts on your own site using Google Lighthouse, the industry-standard performance auditing tool built into Chrome.
+
+If you care about performance, Lighthouse should be part of your regular workflow.
+
+### Step-by-step audit instructions
+
+1. **Open an incognito window:** Always audit in Incognito/Private mode. This ensures that your own browser extensions (like ad blockers or password managers) don't interfere with the test results.
+2. **Open developer tools:** Right-click anywhere on your page and select Inspect, or press F12 (or Cmd+Option+I on Mac).
+3. **Find the Lighthouse tab:** In the DevTools panel, look for the tab labeled "Lighthouse".
+4. **Configure the test:**
+   - **Mode:** Select "Navigation" (default).
+   - **Device:** Select Mobile. (Google uses mobile-first indexing; if your site is fast on mobile, it is fast everywhere).
+   - **Categories:** Ensure "Performance" is checked.
+5. **Run the audit:** Click the blue Analyze page load button. The browser will reload your page several times while simulating a slower network and CPU.
+
+### Interpreting the results for script bloat
+
+When the report finishes, ignore the overall score for a moment and scroll down to the Diagnostics section. Look for these specific red flags related to GTM and third-party scripts:
+
+- **"Reduce unused JavaScript":** Lighthouse will flag scripts that downloaded a lot of code but only used a tiny fraction of it. GTM containers often show up here because they contain logic for every possible tag, even ones not firing on the current page.
+- **"Minimize main-thread work":** This is the CPU culprit. Expand this item, and you will often see expensive tasks related to script evaluation originating from GTM.
+- **Total blocking time (TBT) score:** Look at this metric at the top. If it is in the red (over 600ms), it means scripts are severely locking up the browser.
+
+## The minimalist conclusion
+
+If you are a solo developer or part of a small engineering team, you do not need Google Tag Manager.
+
+It is an abstraction designed for organizational silos that you don't have. It trades performance for a convenience that you don't need.
+
+Stick to the essentials. Hardcode your analytics. Keep your main thread clear. Your users will thank you for the speed, and your future self will thank you for the maintainable code.
+
+
+==================================================
+FILE: website/content/posts/no-select-star.md
+==================================================
+---
+title: "Why you shouldn't use SELECT * in production"
+date: "2026-01-20"
+draft: false
+description: "A classic engineering trade-off: Convenience vs. Stability. Why SELECT * is a landmine in production applications, especially in Go."
+---
+
+**TL;DR:** Using `SELECT *` in production is a high-interest loan on your future stability. In Go, it leads to silent crashes during schema changes, destroys database performance by bypassing indexes, and creates "dark code" that is impossible to refactor. Use explicit column lists and low-abstraction drivers like `pgx` to keep your system predictable.
+
+---
+
+In a quick prototype or a local script, `SELECT *` feels like a shortcut. It’s easy and fast. But in a production Go application, that shortcut is a landmine waiting for a teammate to step on it.
+
+Software engineering is the art of making trade-offs. While `SELECT *` offers **convenience**, it sacrifices **stability**. Here is why high-level engineering requires explicit column selection.
+
+## The "positional scan" crash
+In Go, the standard `database/sql` package—and even lower-level drivers—are remarkably literal. When you use `row.Scan()`, the program doesn't look at column names; it only sees the **order** of the data coming off the wire.
+
+* **The implicit contract:** Your code expects Column 1 to be an `ID` (int) and Column 2 to be an `Email` (string).
+* **The fragile reality:** If a teammate runs a migration—perhaps adding a `MiddleName` column between `ID` and `Email`—your code will blindly try to shove a string into an integer variable.
+
+
+**The result:** Your application crashes in production with a type mismatch error. By explicitly listing your columns, you guarantee the order of the data, making your logic immune to schema changes.
+
+## Hidden performance killers: the pipeline view
+Engineering isn't just about how fast a query runs on the database; it’s about the entire data pipeline.
+
+### Network and memory bloat
+Your `users` table might be lean today. But what happens when someone adds a `profile_picture_blob` or a massive `metadata` JSON field? If you use `SELECT *`, you are now dragging megabytes of unnecessary data across the network and deserializing it into memory for every single query—even if you only needed a username.
+
+### The "covering index" hit
+This is the Staff-level "why." Databases are fast because of **indexes**. A "Covering Index" allows the database to answer your query using only the index, without ever touching the actual table (the "heap"). 
+
+When you use `SELECT *`, you force the database to fetch every single column from the heap. You effectively kill the database’s ability to stay in its "fast lane," turning a millisecond operation into a disk-I/O bottleneck.
+
+## The "greppability" test
+Code must be searchable. Imagine you are tasked with renaming a column or deprecating a field. 
+
+If you explicitly list `email_address` in your SQL queries, a simple `grep` or "Find Usages" in your IDE will show you exactly which parts of your Go application are affected. If you use `SELECT *`, your code becomes a **black box**. You have no way of knowing which fields are actually used by the business logic without running the code and hoping for the best. 
+
+**Explicit code is maintainable code.**
+
+
+## Why I use `pgx` over "magic" frameworks
+Choosing a tool like **`pgx`** over a heavy ORM follows the philosophy of **"Simple, not easy."**
+
+* **Performance:** `pgx` supports PostgreSQL-specific features like binary protocol and `COPY` that generic wrappers hide.
+* **Transparency:** The SQL you write is the SQL that runs. There are no "hidden" queries generated by a library behind your back.
+* **Granular control:** It gives you PostgreSQL-specific error codes, making it easy to distinguish a connection timeout from a constraint violation.
+
+
+## Before & after: the landmine vs. the contract
+
+### ❌ The "landmine" (fragile)
+```go
+func GetUser(ctx context.Context, db *pgx.Conn, id int) (*User, error) {
+    var u User
+    // DANGER: If the DB schema changes order, this will fail or corrupt data.
+    err := db.QueryRow(ctx, "SELECT * FROM users WHERE id=$1", id).Scan(
+        &u.ID, 
+        &u.Email, 
+        &u.Name,
+    )
+    return &u, err
+}
+✅ The "contract" (robust)
+Go
+
+const userFields = "id, email, name"
+
+func GetUser(ctx context.Context, db *pgx.Conn, id int) (*User, error) {
+    var u User
+    query := fmt.Sprintf("SELECT %s FROM users WHERE id=$1", userFields)
+    
+    // Explicit list: even if the table grows to 100 columns, this remains fast.
+    err := db.QueryRow(ctx, query, id).Scan(
+        &u.ID, 
+        &u.Email, 
+        &u.Name,
+    )
+    
+    if err != nil {
+        return nil, fmt.Errorf("fetch user: %w", err)
+    }
+    return &u, nil
+}
+```
+
+
+## Summary
+A junior engineer writes code that works today. A Senior engineer writes code that works three years from now, even after dozens of schema migrations.
+
+Avoid SELECT *. Be explicit. Treat your SQL as a strict contract, and your production environment will thank you.
+
+==================================================
+FILE: website/content/posts/why-i-stopped-using-hover-and-transition-effects.md
+==================================================
+---
+title: "Why I stopped using hover and transition effects"
+date: "2026-01-23"
+draft: false
+description: "In a mobile-first world, hover and transition effects are mostly dead code. Why I prefer simpler Tailwind, faster pages, and better readability."
+---
+
+In a mobile-first world, fancy UI is just technical debt
+
+## **The readability tax**
+
+I use TailwindCSS for every project; it offers total control without leaving the HTML. But that control comes with a price: **visual noise**. Between layout, spacing, and typography, a single button can easily carry ten classes; when you add "hover," "transition-all," and "duration-300," you are not just styling; you are cluttering. You are making the code harder to read for a feature most users will never see.
+
+## **The bloat of a single button**
+
+Consider a standard "get started" button. To make it functional, accessible, and "pretty" by modern standards, your HTML looks like this:
+
+```html
+<div class="mt-10 flex items-center justify-center gap-x-6">
+  <a href="#" class="rounded-md bg-indigo-500 px-3.5 py-2.5 text-sm font-semibold text-white shadow-xs transition-all duration-300 ease-in-out hover:bg-indigo-400 hover:scale-105 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">
+    Get started
+  </a>
+  <a href="#" class="text-sm/6 font-semibold text-white">
+    Learn more <span aria-hidden="true">→</span>
+  </a>
+</div>
+```
+
+Look at that class string. Half of those classes; specifically hover:bg-indigo-400, hover:scale-105, transition-all, and duration-300; are desktop ghosts. They exist for a mouse cursor that is not there on a mobile device; by chasing "polish," we have doubled the length of our code. It is now harder for any developer to scan the file and understand the actual structure of the page.
+
+## **The mobile ghost town**
+
+We need to stop designing for ourselves; most users visit your site from a phone. Hover effects do not work on mobile; when a user taps a button on a smartphone, the "hover" state might flicker for a millisecond; or worse, it gets stuck in a "persistent hover" state that requires a second tap to clear. We are shipping dead code to our users' browsers.
+
+Transitions and backdrop-blur are even worse; they require the mobile processor to "repaint" the screen constantly. On a budget smartphone, this does not look smooth; it looks like "jank." It makes your premium UI feel like a cheap toy.
+
+## **The Amazon paradox: brutalist utility**
+
+If "pretty" was the secret to success, Amazon would have gone bankrupt a decade ago. The Amazon UI looks like a relic from the 90s; it is "ugly" by design school standards. But Amazon understands something most designers forget: users do not visit your site to admire the buttons. They are there to solve a problem.
+
+Amazon spent millions to learn that:
+
+- **Predictability beats novelty:** Users know exactly where the "Add to Cart" button is.
+- **Speed is a feature:** Every millisecond of delay costs them money.
+- **Consistency creates trust:** When a system works the same way every time, users feel safe.
+
+They do not change their UI to match the latest trends; they know it adds zero value to the customer’s mission.
+
+## **Simple is hard (but better)**
+
+A senior engineer’s value is not measured by how many fancy CSS tricks they can cram into a tag; it is measured by how much value they deliver with the least amount of complexity.
+
+- **Prioritize focus over hover:** Spend your time on focus-visible and accessibility; that helps everyone.
+- **Prioritize speed over polish:** A site that loads in 500ms with a "90s design" will always have a better UX than a "modern" site that takes 3 seconds to animate in.
+- **Prioritize readability over control:** Keep your Tailwind classes lean; if you do not need the transition, delete it.
+
+## Summary
+
+Stop building for your desktop monitor; keep your UI clean, minimal, and lightning-fast. In a world of "fancy" technical debt, simplicity is the ultimate competitive advantage.
+
+
+==================================================
+FILE: website/dist/blog/cleaning-digital-attic-cloudflare-pages/index.html
+==================================================
+<!doctype html><html lang="en" class="dark h-full antialiased overflow-y-scroll"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><!-- Fonts: JetBrains Mono --><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100..800&display=swap" rel="stylesheet"><!-- Custom CSS --><link rel="stylesheet" href="/static/css/prose.css"><link rel="icon" href="/static/favicon.ico" type="image/x-icon"><title>Cleaning the digital attic; automating Cloudflare Pages with Go | Maciej Adamski</title><meta name="description" content="A concurrency-first Go utility to clean up old Cloudflare Pages deployments safely and fast."><link rel="canonical" href="https://maciejadamski.com/blog/cleaning-digital-attic-cloudflare-pages/"><meta name="robots" content="index,follow"><!-- Open Graph --><meta property="og:type" content="article"><meta property="og:url" content="https://maciejadamski.com/blog/cleaning-digital-attic-cloudflare-pages/"><meta property="og:title" content="Cleaning the digital attic; automating Cloudflare Pages with Go | Maciej Adamski"><meta property="og:description" content="A concurrency-first Go utility to clean up old Cloudflare Pages deployments safely and fast."><meta property="og:image" content="https://maciejadamski.com/static/og-image.png"><meta property="og:site_name" content="Maciej Adamski"><!-- Twitter --><meta name="twitter:card" content="summary"><meta name="twitter:title" content="Cleaning the digital attic; automating Cloudflare Pages with Go | Maciej Adamski"><meta name="twitter:description" content="A concurrency-first Go utility to clean up old Cloudflare Pages deployments safely and fast."><meta name="twitter:image" content="https://maciejadamski.com/static/og-image.png"><!-- Google --><meta name="google-site-verification" content="Nax5qJbDjGM1csEKyBZpz9fu0fiEEsj_NhaR6VD5AYE"><!-- Structured Data --><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","datePublished":"2026-01-21","description":"A concurrency-first Go utility to clean up old Cloudflare Pages deployments safely and fast.","headline":"Cleaning the digital attic; automating Cloudflare Pages with Go | Maciej Adamski","image":"https://maciejadamski.com/static/og-image.png","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://maciejadamski.com/static/logos/logo.svg"},"name":"Maciej Adamski"},"url":"https://maciejadamski.com/blog/cleaning-digital-attic-cloudflare-pages/"}</script><!-- Tailwind CSS --><script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script><script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script><style>
+				:root {
+					--font-sans: 'JetBrains Mono', monospace;
+					--font-mono: 'JetBrains Mono', monospace;
+					--color-white: #e4e4e5;
+					--color-white-pure: #ffffff;
+					--color-gray: #909093;
+					--color-link: #b2c3ff;
+					--color-surface: #343438;
+					--color-page-background: #1c1c1d;
+					--color-border: #39393b;
+					--color-border-dark: #333333;
+					--color-scrollbar: #555555;
+					--radius-container: 12px;
+				}
+			</style><style type="text/tailwindcss">
+				@theme {
+						--font-sans: var(--font-sans);
+						--font-mono: var(--font-mono);
+						--color-white: var(--color-white);
+						--color-gray: var(--color-gray);
+						--color-link: var(--color-link);
+						--color-surface: var(--color-surface);
+						--color-page-background: var(--color-page-background);
+						--color-border: var(--color-border);
+				}
+			</style><!-- Analytics --><script async src="https://www.googletagmanager.com/gtag/js?id=G-8N2WJRPVCH"></script><script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-8N2WJRPVCH');</script></head><body class="bg-page-background font-mono text-white text-base min-h-full flex flex-col"><header class="absolute inset-x-0 top-0 z-50"><nav aria-label="Global" class="mx-auto max-w-7xl flex items-center justify-between p-4 lg:px-8"><div class="flex lg:flex-1"><a href="/" class="-m-1.5 p-1.5 text-white"><span class="block text-2xl font-bold leading-none tracking-tight"><span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span></span> <span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span></a></div><div class="flex lg:hidden"><button type="button" command="show-modal" commandfor="mobile-menu" class="-m-2.5 inline-flex items-center justify-center rounded-md p-2.5 text-gray"><span class="sr-only">Open main menu</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6"><path d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></div><div class="hidden lg:flex lg:gap-x-12"><a href="/blog/" class="text-sm/6 font-semibold text-link underline underline-offset-4">/blog</a> <a href="/#contact" class="text-sm/6 font-semibold text-link underline underline-offset-4">/contact</a></div></nav></header><el-dialog><dialog id="mobile-menu" class="fixed inset-0 m-0 w-full max-w-none border-0 bg-transparent p-0 backdrop:bg-transparent lg:hidden"><div tabindex="0" class="fixed inset-0"><el-dialog-panel class="fixed inset-y-0 right-0 z-50 w-full overflow-y-auto bg-surface p-4 sm:max-w-sm"><div class="flex items-center justify-between"><a href="/" class="-m-1.5 p-1.5 text-white"><span class="block text-2xl font-bold leading-none tracking-tight"><span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span></span> <span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span></a> <button type="button" command="close" commandfor="mobile-menu" class="-m-2.5 rounded-md p-2.5 text-gray"><span class="sr-only">Close menu</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6"><path d="M6 18 18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></div><div class="mt-6 flow-root"><div class="-my-6 divide-y divide-gray-500/10"><div class="space-y-2 py-6"><a href="/blog/" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/blog</a> <a href="/#contact" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/contact</a></div></div></div></el-dialog-panel></div></dialog></el-dialog><main class="flex-1"><article class="max-w-3xl mx-auto py-24"><header class="mb-12"><h1 class="text-4xl font-semibold tracking-tight leading-tight mb-4">Cleaning the digital attic; automating Cloudflare Pages with Go</h1><div class="flex gap-4 text-gray text-sm"><span>January 21, 2026</span></div></header><div class="prose prose-invert max-w-none"><p>In modern web development, &quot;set it and forget it&quot; is a lie. I ran into a different kind of mess while cleaning up my Cloudflare organization. I could not delete unused Cloudflare Workers for my websites because there were hundreds of old Cloudflare Pages deployments tied to those previews. Every branch, every preview, and every minor tweak was living forever in the Cloudflare cloud.</p>
+<p>Cloudflare is generous, but thousands of dead deployments make the UI hard to navigate and clutter the project history. I needed a way to wipe the old deployments while keeping production safe and untouched.</p>
+<h2>The problem: manual cleanup doesn't scale</h2>
+<p>Cloudflare's dashboard is fine for a few deployments, but manually clicking &quot;Delete&quot; on hundreds is not a task for an engineer. In my case I had more than 400 deployments, and deleting them by hand would take a lot of time. I needed a tool that was:</p>
+<ul>
+<li><strong>Fast</strong> &gt; It should handle deletions in parallel.</li>
+<li><strong>Safe</strong> &gt; It must never, under any circumstances, delete the active production site.</li>
+<li><strong>Simple</strong> &gt; No heavy dependencies. Just a single binary I can run from my terminal.</li>
+</ul>
+<h2>The solution: a concurrency-first Go utility</h2>
+<p>I chose Go for this task because of its first-class support for concurrency and its clear, practical approach to systems tooling.</p>
+<h3>1. The &quot;bouncer&quot; pattern (semaphores)</h3>
+<p>When hitting an API, you cannot just fire off 1,000 requests at once. You will hit rate limits or exhaust your local network sockets. I implemented a semaphore pattern using Go channels.</p>
+<p>By using a buffered channel, I created a &quot;bouncer&quot; that only allows 15 workers into the &quot;club&quot; at any given time. This keeps the execution fast but respectful of Cloudflare's API limits.</p>
+<h3>2. Failing fast and being &quot;production-aware&quot;</h3>
+<p>The most dangerous part of an automated deletion script is the risk of deleting the live site. I designed the filtering logic to be strictly production-aware.</p>
+<p>Before the script even attempts a deletion, it inspects the deployment metadata. If the environment is marked as production, the script skips it entirely. Even if that check fails, I added a secondary layer: the script parses the raw JSON error bodies from Cloudflare. When we hit the specific error <code>8000034</code> (&quot;Cannot delete active production&quot;), the script handles it gracefully instead of crashing.</p>
+<h3>3. The &quot;maintainless&quot; workflow</h3>
+<p>Following the KISS (Keep It Simple, Stupid) principle, I wrapped the entire logic in a Makefile. I do not want to remember complex CLI flags or environment variable exports.</p>
+<ul>
+<li><code>make run</code>: Cleans up the default project.</li>
+<li><code>make nuke project_name=xxx</code>: Targets a specific site.</li>
+</ul>
+<p>This local-first approach ensures I can verify the cleanup on my machine before even thinking about putting it into a CI/CD pipeline.</p>
+<h2>Engineering lessons learned</h2>
+<ul>
+<li><strong>Simple is not easy</strong> &gt; Writing a script that does not get stuck in an infinite loop when it hits a protected resource takes more thought than just a basic for loop.</li>
+<li><strong>Stream the data</strong> &gt; Using <code>json.NewDecoder</code> allowed the script to handle large batches of deployment data without spiking memory usage.</li>
+<li><strong>Secrets belong in the environment</strong> &gt; Using <code>.env</code> files and <code>os.Getenv</code> kept my API tokens safe and out of the source code.</li>
+</ul>
+<h2>Check out the code</h2>
+<p>You can find the full source code, the Makefile, and the documentation on my GitHub: <a href="https://github.com/dg-dataglitch/cloudflare-pages-cleanup">https://github.com/dg-dataglitch/cloudflare-pages-cleanup</a></p>
+</div><footer class="mt-16 pt-8 border-t border-border"><a href="/blog/" class="text-sm font-semibold text-link underline underline-offset-4"><span aria-hidden="true">&larr;</span> Back to blog</a></footer></article></main><footer class="border-t border-border"><div class="mx-auto max-w-7xl px-6 py-16 flex items-center justify-center lg:px-8"><p class="text-center text-xs leading-5 text-gray">&copy; 2026 Maciej Adamski. All rights reserved.</p></div></footer></body></html>
+
+==================================================
+FILE: website/dist/blog/index.html
+==================================================
+<!doctype html><html lang="en" class="dark h-full antialiased overflow-y-scroll"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><!-- Fonts: JetBrains Mono --><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100..800&display=swap" rel="stylesheet"><!-- Custom CSS --><link rel="stylesheet" href="/static/css/prose.css"><link rel="icon" href="/static/favicon.ico" type="image/x-icon"><title>Blog | Maciej Adamski</title><meta name="description" content="Latest articles and insights from Maciej Adamski"><link rel="canonical" href="https://maciejadamski.com/blog/"><meta name="robots" content="index,follow"><!-- Open Graph --><meta property="og:type" content="website"><meta property="og:url" content="https://maciejadamski.com/blog/"><meta property="og:title" content="Blog | Maciej Adamski"><meta property="og:description" content="Latest articles and insights from Maciej Adamski"><meta property="og:image" content="https://maciejadamski.com/static/og-image.png"><meta property="og:site_name" content="Maciej Adamski"><!-- Twitter --><meta name="twitter:card" content="summary"><meta name="twitter:title" content="Blog | Maciej Adamski"><meta name="twitter:description" content="Latest articles and insights from Maciej Adamski"><meta name="twitter:image" content="https://maciejadamski.com/static/og-image.png"><!-- Google --><meta name="google-site-verification" content="Nax5qJbDjGM1csEKyBZpz9fu0fiEEsj_NhaR6VD5AYE"><!-- Structured Data --><!-- Tailwind CSS --><script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script><script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script><style>
+				:root {
+					--font-sans: 'JetBrains Mono', monospace;
+					--font-mono: 'JetBrains Mono', monospace;
+					--color-white: #e4e4e5;
+					--color-white-pure: #ffffff;
+					--color-gray: #909093;
+					--color-link: #b2c3ff;
+					--color-surface: #343438;
+					--color-page-background: #1c1c1d;
+					--color-border: #39393b;
+					--color-border-dark: #333333;
+					--color-scrollbar: #555555;
+					--radius-container: 12px;
+				}
+			</style><style type="text/tailwindcss">
+				@theme {
+						--font-sans: var(--font-sans);
+						--font-mono: var(--font-mono);
+						--color-white: var(--color-white);
+						--color-gray: var(--color-gray);
+						--color-link: var(--color-link);
+						--color-surface: var(--color-surface);
+						--color-page-background: var(--color-page-background);
+						--color-border: var(--color-border);
+				}
+			</style><!-- Analytics --><script async src="https://www.googletagmanager.com/gtag/js?id=G-8N2WJRPVCH"></script><script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-8N2WJRPVCH');</script></head><body class="bg-page-background font-mono text-white text-base min-h-full flex flex-col"><header class="absolute inset-x-0 top-0 z-50"><nav aria-label="Global" class="mx-auto max-w-7xl flex items-center justify-between p-4 lg:px-8"><div class="flex lg:flex-1"><a href="/" class="-m-1.5 p-1.5 text-white"><span class="block text-2xl font-bold leading-none tracking-tight"><span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span></span> <span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span></a></div><div class="flex lg:hidden"><button type="button" command="show-modal" commandfor="mobile-menu" class="-m-2.5 inline-flex items-center justify-center rounded-md p-2.5 text-gray"><span class="sr-only">Open main menu</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6"><path d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></div><div class="hidden lg:flex lg:gap-x-12"><a href="/blog/" class="text-sm/6 font-semibold text-link underline underline-offset-4">/blog</a> <a href="/#contact" class="text-sm/6 font-semibold text-link underline underline-offset-4">/contact</a></div></nav></header><el-dialog><dialog id="mobile-menu" class="fixed inset-0 m-0 w-full max-w-none border-0 bg-transparent p-0 backdrop:bg-transparent lg:hidden"><div tabindex="0" class="fixed inset-0"><el-dialog-panel class="fixed inset-y-0 right-0 z-50 w-full overflow-y-auto bg-surface p-4 sm:max-w-sm"><div class="flex items-center justify-between"><a href="/" class="-m-1.5 p-1.5 text-white"><span class="block text-2xl font-bold leading-none tracking-tight"><span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span></span> <span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span></a> <button type="button" command="close" commandfor="mobile-menu" class="-m-2.5 rounded-md p-2.5 text-gray"><span class="sr-only">Close menu</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6"><path d="M6 18 18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></div><div class="mt-6 flow-root"><div class="-my-6 divide-y divide-gray-500/10"><div class="space-y-2 py-6"><a href="/blog/" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/blog</a> <a href="/#contact" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/contact</a></div></div></div></el-dialog-panel></div></dialog></el-dialog><main class="flex-1"><div class="max-w-3xl mx-auto py-24"><div class="mb-16 border-b border-border pb-12"><h1 class="text-4xl font-semibold tracking-tight leading-tight mb-4">Blog</h1><p class="text-base/7 text-gray">Thoughts, ideas, and tutorials</p></div><div class="flex flex-col gap-12"><div class="border-b border-border pb-12 last:border-0"><p class="text-gray text-xs uppercase tracking-widest mb-4">January 23, 2026</p><h2 class="text-xl font-semibold tracking-tight leading-tight mb-3"><a href="/blog/why-i-stopped-using-hover-and-transition-effects/" class="text-link underline underline-offset-4">Why I stopped using hover and transition effects</a></h2><p class="text-gray text-base/7 mb-6">In a mobile-first world, hover and transition effects are mostly dead code. Why I prefer simpler Tailwind, faster pages, and better readability.</p></div><div class="border-b border-border pb-12 last:border-0"><p class="text-gray text-xs uppercase tracking-widest mb-4">January 22, 2026</p><h2 class="text-xl font-semibold tracking-tight leading-tight mb-3"><a href="/blog/middleman-tax-ditch-google-tag-manager/" class="text-link underline underline-offset-4">Why developers should ditch Google Tag Manager</a></h2><p class="text-gray text-base/7 mb-6">In modern web development, there is a constant tension between marketing agility and engineering reality. GTM is often a Trojan horse. Here is why you should cut out the middleman.</p></div><div class="border-b border-border pb-12 last:border-0"><p class="text-gray text-xs uppercase tracking-widest mb-4">January 21, 2026</p><h2 class="text-xl font-semibold tracking-tight leading-tight mb-3"><a href="/blog/cleaning-digital-attic-cloudflare-pages/" class="text-link underline underline-offset-4">Cleaning the digital attic; automating Cloudflare Pages with Go</a></h2><p class="text-gray text-base/7 mb-6">A concurrency-first Go utility to clean up old Cloudflare Pages deployments safely and fast.</p></div><div class="border-b border-border pb-12 last:border-0"><p class="text-gray text-xs uppercase tracking-widest mb-4">January 20, 2026</p><h2 class="text-xl font-semibold tracking-tight leading-tight mb-3"><a href="/blog/no-select-star/" class="text-link underline underline-offset-4">Why you shouldn&#39;t use SELECT * in production</a></h2><p class="text-gray text-base/7 mb-6">A classic engineering trade-off: Convenience vs. Stability. Why SELECT * is a landmine in production applications, especially in Go.</p></div></div></div></main><footer class="border-t border-border"><div class="mx-auto max-w-7xl px-6 py-16 flex items-center justify-center lg:px-8"><p class="text-center text-xs leading-5 text-gray">&copy; 2026 Maciej Adamski. All rights reserved.</p></div></footer></body></html>
+
+==================================================
+FILE: website/dist/blog/middleman-tax-ditch-google-tag-manager/index.html
+==================================================
+<!doctype html><html lang="en" class="dark h-full antialiased overflow-y-scroll"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><!-- Fonts: JetBrains Mono --><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100..800&display=swap" rel="stylesheet"><!-- Custom CSS --><link rel="stylesheet" href="/static/css/prose.css"><link rel="icon" href="/static/favicon.ico" type="image/x-icon"><title>Why developers should ditch Google Tag Manager | Maciej Adamski</title><meta name="description" content="In modern web development, there is a constant tension between marketing agility and engineering reality. GTM is often a Trojan horse. Here is why you should cut out the middleman."><link rel="canonical" href="https://maciejadamski.com/blog/middleman-tax-ditch-google-tag-manager/"><meta name="robots" content="index,follow"><!-- Open Graph --><meta property="og:type" content="article"><meta property="og:url" content="https://maciejadamski.com/blog/middleman-tax-ditch-google-tag-manager/"><meta property="og:title" content="Why developers should ditch Google Tag Manager | Maciej Adamski"><meta property="og:description" content="In modern web development, there is a constant tension between marketing agility and engineering reality. GTM is often a Trojan horse. Here is why you should cut out the middleman."><meta property="og:image" content="https://maciejadamski.com/static/og-image.png"><meta property="og:site_name" content="Maciej Adamski"><!-- Twitter --><meta name="twitter:card" content="summary"><meta name="twitter:title" content="Why developers should ditch Google Tag Manager | Maciej Adamski"><meta name="twitter:description" content="In modern web development, there is a constant tension between marketing agility and engineering reality. GTM is often a Trojan horse. Here is why you should cut out the middleman."><meta name="twitter:image" content="https://maciejadamski.com/static/og-image.png"><!-- Google --><meta name="google-site-verification" content="Nax5qJbDjGM1csEKyBZpz9fu0fiEEsj_NhaR6VD5AYE"><!-- Structured Data --><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","datePublished":"2026-01-22","description":"In modern web development, there is a constant tension between marketing agility and engineering reality. GTM is often a Trojan horse. Here is why you should cut out the middleman.","headline":"Why developers should ditch Google Tag Manager | Maciej Adamski","image":"https://maciejadamski.com/static/og-image.png","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://maciejadamski.com/static/logos/logo.svg"},"name":"Maciej Adamski"},"url":"https://maciejadamski.com/blog/middleman-tax-ditch-google-tag-manager/"}</script><!-- Tailwind CSS --><script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script><script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script><style>
+				:root {
+					--font-sans: 'JetBrains Mono', monospace;
+					--font-mono: 'JetBrains Mono', monospace;
+					--color-white: #e4e4e5;
+					--color-white-pure: #ffffff;
+					--color-gray: #909093;
+					--color-link: #b2c3ff;
+					--color-surface: #343438;
+					--color-page-background: #1c1c1d;
+					--color-border: #39393b;
+					--color-border-dark: #333333;
+					--color-scrollbar: #555555;
+					--radius-container: 12px;
+				}
+			</style><style type="text/tailwindcss">
+				@theme {
+						--font-sans: var(--font-sans);
+						--font-mono: var(--font-mono);
+						--color-white: var(--color-white);
+						--color-gray: var(--color-gray);
+						--color-link: var(--color-link);
+						--color-surface: var(--color-surface);
+						--color-page-background: var(--color-page-background);
+						--color-border: var(--color-border);
+				}
+			</style><!-- Analytics --><script async src="https://www.googletagmanager.com/gtag/js?id=G-8N2WJRPVCH"></script><script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-8N2WJRPVCH');</script></head><body class="bg-page-background font-mono text-white text-base min-h-full flex flex-col"><header class="absolute inset-x-0 top-0 z-50"><nav aria-label="Global" class="mx-auto max-w-7xl flex items-center justify-between p-4 lg:px-8"><div class="flex lg:flex-1"><a href="/" class="-m-1.5 p-1.5 text-white"><span class="block text-2xl font-bold leading-none tracking-tight"><span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span></span> <span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span></a></div><div class="flex lg:hidden"><button type="button" command="show-modal" commandfor="mobile-menu" class="-m-2.5 inline-flex items-center justify-center rounded-md p-2.5 text-gray"><span class="sr-only">Open main menu</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6"><path d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></div><div class="hidden lg:flex lg:gap-x-12"><a href="/blog/" class="text-sm/6 font-semibold text-link underline underline-offset-4">/blog</a> <a href="/#contact" class="text-sm/6 font-semibold text-link underline underline-offset-4">/contact</a></div></nav></header><el-dialog><dialog id="mobile-menu" class="fixed inset-0 m-0 w-full max-w-none border-0 bg-transparent p-0 backdrop:bg-transparent lg:hidden"><div tabindex="0" class="fixed inset-0"><el-dialog-panel class="fixed inset-y-0 right-0 z-50 w-full overflow-y-auto bg-surface p-4 sm:max-w-sm"><div class="flex items-center justify-between"><a href="/" class="-m-1.5 p-1.5 text-white"><span class="block text-2xl font-bold leading-none tracking-tight"><span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span></span> <span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span></a> <button type="button" command="close" commandfor="mobile-menu" class="-m-2.5 rounded-md p-2.5 text-gray"><span class="sr-only">Close menu</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6"><path d="M6 18 18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></div><div class="mt-6 flow-root"><div class="-my-6 divide-y divide-gray-500/10"><div class="space-y-2 py-6"><a href="/blog/" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/blog</a> <a href="/#contact" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/contact</a></div></div></div></el-dialog-panel></div></dialog></el-dialog><main class="flex-1"><article class="max-w-3xl mx-auto py-24"><header class="mb-12"><h1 class="text-4xl font-semibold tracking-tight leading-tight mb-4">Why developers should ditch Google Tag Manager</h1><div class="flex gap-4 text-gray text-sm"><span>January 22, 2026</span></div></header><div class="prose prose-invert max-w-none"><p>In modern web development, there is a constant tension between marketing agility and engineering reality.</p>
+<p>Marketing teams want to deploy tracking pixels, A/B testing scripts, and chat widgets instantly without waiting for a two-week engineering sprint cycle. Engineers want a clean codebase, fast load times, and version control over everything that runs in the user's browser.</p>
+<p>Google Tag Manager (GTM) was invented to solve this tension. It promised a demilitarized zone; a dashboard where marketers could inject scripts without touching the source code.</p>
+<p>It sounds like a win-win. But if you care about performance, simplicity, and maintaining control over your application, GTM is often a Trojan horse.</p>
+<p>As engineers, it is time we treated GTM for what it is; an unnecessary abstraction layer that introduces latency and technical debt.</p>
+<p>Here is the developer’s perspective on why you should cut out the middleman, which tools you actually need, and how to prove the performance cost yourself.</p>
+<h2>The high cost of &quot;convenience&quot;</h2>
+<p>My engineering philosophy is built on a simple premise; less is more. Every line of code is a liability. Every external dependency is a potential point of failure or friction.</p>
+<p>Google Tag Manager violates this principle by design. It is a container script whose sole purpose is to inject other scripts.</p>
+<h3>The technical problem -&gt; the JavaScript waterfall</h3>
+<p>When you install GTM, you aren't just adding one script to your <code>&lt;head&gt;</code>. You are adding a gatekeeper.</p>
+<p>Here is what happens in the browser network waterfall when a user visits a site using GTM:</p>
+<ol>
+<li><strong>The browser downloads <code>gtm.js</code>:</strong> This library is hefty because it contains the logic to parse rules, triggers, and variables.</li>
+<li><strong>Execution &amp; parsing:</strong> The browser’s main thread, the same thread responsible for responding to user clicks and scrolling, must pause to execute this library. It has to figure out &quot;What page am I on? What rules apply here?&quot;.</li>
+<li><strong>Injection waterfall:</strong> Once GTM figures out what to do, it starts injecting other tags. It might inject Google Analytics (<code>gtag.js</code>), then a Facebook Pixel, then a LinkedIn Insight tag.</li>
+</ol>
+<p>This is the &quot;middleman tax&quot;.</p>
+<p>Instead of the browser just downloading Google Analytics directly (a single request), it has to download the manager, run the manager, and then download analytics.</p>
+<h2>The performance impact -&gt; total blocking time (TBT)</h2>
+<p>The real killer isn't just the network request; it is the CPU usage.</p>
+<p>JavaScript is single-threaded. When GTM is busy evaluating dozens of triggers to decide if it should fire a &quot;Scroll Depth&quot; event, the main thread is blocked.</p>
+<p>If a user tries to click a button or open a menu while GTM is thinking, the site will feel sluggish or unresponsive. In performance metrics, this increases total blocking time (TBT); a metric which directly hurts your Core Web Vitals and, consequently, user experience and SEO.</p>
+<h2>The philosophy problem -&gt; loss of control</h2>
+<p>As a backend engineer, I want source control for everything. If a piece of logic changes how my application behaves, I want to see that change in a Git commit diff.</p>
+<p>GTM hides critical application logic inside a proprietary Google dashboard. If your site suddenly slows down, you can’t <code>git blame</code> to see who added a massive 5MB unoptimized Hotjar recording script. You have to log into GTM, dig through version history, and decipher what happened.</p>
+<p>If you are the engineer responsible for the site, you should control the code that runs on it.</p>
+<h2>The essentials -&gt; what you actually need</h2>
+<p>Ditching GTM does not mean flying blind. Data is crucial. But we need to distinguish between essential telemetry and bloated tag management.</p>
+<p>There are two Google tools that are non-negotiable for any serious website.</p>
+<h3>1. Google Search Console (the external health check)</h3>
+<p><strong>What it is:</strong> This is the interface between you and the Googlebot crawler.
+<strong>Why you need it:</strong> It tells you if Google can find and understand your site. You use it to submit your <code>sitemap.xml</code> (which you should generate via code in your backend). It alerts you to critical indexing errors or security issues.
+<strong>Performance cost:</strong> Zero. It runs on Google's servers, not your user's browser.</p>
+<h3>2. Google Analytics 4 (the internal telemetry)</h3>
+<p><strong>What it is:</strong> The record of user behavior on your site.
+<strong>Why you need it:</strong> To know if anyone is actually reading what you write.
+<strong>How to implement it:</strong> Hardcode the lightweight <code>gtag.js</code> snippet directly into your main layout template (e.g., your base <code>templ</code> file in Go).</p>
+<p>By hardcoding GA4, you ensure it loads as fast as possible, it is version-controlled in Git, and you aren't loading the entire GTM library just to fire a simple pageview event.</p>
+<h2>The diagnosis -&gt; how to audit your site with Lighthouse</h2>
+<p>You don't have to take my word for it. You can see the impact of scripts on your own site using Google Lighthouse, the industry-standard performance auditing tool built into Chrome.</p>
+<p>If you care about performance, Lighthouse should be part of your regular workflow.</p>
+<h3>Step-by-step audit instructions</h3>
+<ol>
+<li><strong>Open an incognito window:</strong> Always audit in Incognito/Private mode. This ensures that your own browser extensions (like ad blockers or password managers) don't interfere with the test results.</li>
+<li><strong>Open developer tools:</strong> Right-click anywhere on your page and select Inspect, or press F12 (or Cmd+Option+I on Mac).</li>
+<li><strong>Find the Lighthouse tab:</strong> In the DevTools panel, look for the tab labeled &quot;Lighthouse&quot;.</li>
+<li><strong>Configure the test:</strong>
+<ul>
+<li><strong>Mode:</strong> Select &quot;Navigation&quot; (default).</li>
+<li><strong>Device:</strong> Select Mobile. (Google uses mobile-first indexing; if your site is fast on mobile, it is fast everywhere).</li>
+<li><strong>Categories:</strong> Ensure &quot;Performance&quot; is checked.</li>
+</ul>
+</li>
+<li><strong>Run the audit:</strong> Click the blue Analyze page load button. The browser will reload your page several times while simulating a slower network and CPU.</li>
+</ol>
+<h3>Interpreting the results for script bloat</h3>
+<p>When the report finishes, ignore the overall score for a moment and scroll down to the Diagnostics section. Look for these specific red flags related to GTM and third-party scripts:</p>
+<ul>
+<li><strong>&quot;Reduce unused JavaScript&quot;:</strong> Lighthouse will flag scripts that downloaded a lot of code but only used a tiny fraction of it. GTM containers often show up here because they contain logic for every possible tag, even ones not firing on the current page.</li>
+<li><strong>&quot;Minimize main-thread work&quot;:</strong> This is the CPU culprit. Expand this item, and you will often see expensive tasks related to script evaluation originating from GTM.</li>
+<li><strong>Total blocking time (TBT) score:</strong> Look at this metric at the top. If it is in the red (over 600ms), it means scripts are severely locking up the browser.</li>
+</ul>
+<h2>The minimalist conclusion</h2>
+<p>If you are a solo developer or part of a small engineering team, you do not need Google Tag Manager.</p>
+<p>It is an abstraction designed for organizational silos that you don't have. It trades performance for a convenience that you don't need.</p>
+<p>Stick to the essentials. Hardcode your analytics. Keep your main thread clear. Your users will thank you for the speed, and your future self will thank you for the maintainable code.</p>
+</div><footer class="mt-16 pt-8 border-t border-border"><a href="/blog/" class="text-sm font-semibold text-link underline underline-offset-4"><span aria-hidden="true">&larr;</span> Back to blog</a></footer></article></main><footer class="border-t border-border"><div class="mx-auto max-w-7xl px-6 py-16 flex items-center justify-center lg:px-8"><p class="text-center text-xs leading-5 text-gray">&copy; 2026 Maciej Adamski. All rights reserved.</p></div></footer></body></html>
+
+==================================================
+FILE: website/dist/blog/no-select-star/index.html
+==================================================
+<!doctype html><html lang="en" class="dark h-full antialiased overflow-y-scroll"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><!-- Fonts: JetBrains Mono --><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100..800&display=swap" rel="stylesheet"><!-- Custom CSS --><link rel="stylesheet" href="/static/css/prose.css"><link rel="icon" href="/static/favicon.ico" type="image/x-icon"><title>Why you shouldn&#39;t use SELECT * in production | Maciej Adamski</title><meta name="description" content="A classic engineering trade-off: Convenience vs. Stability. Why SELECT * is a landmine in production applications, especially in Go."><link rel="canonical" href="https://maciejadamski.com/blog/no-select-star/"><meta name="robots" content="index,follow"><!-- Open Graph --><meta property="og:type" content="article"><meta property="og:url" content="https://maciejadamski.com/blog/no-select-star/"><meta property="og:title" content="Why you shouldn&#39;t use SELECT * in production | Maciej Adamski"><meta property="og:description" content="A classic engineering trade-off: Convenience vs. Stability. Why SELECT * is a landmine in production applications, especially in Go."><meta property="og:image" content="https://maciejadamski.com/static/og-image.png"><meta property="og:site_name" content="Maciej Adamski"><!-- Twitter --><meta name="twitter:card" content="summary"><meta name="twitter:title" content="Why you shouldn&#39;t use SELECT * in production | Maciej Adamski"><meta name="twitter:description" content="A classic engineering trade-off: Convenience vs. Stability. Why SELECT * is a landmine in production applications, especially in Go."><meta name="twitter:image" content="https://maciejadamski.com/static/og-image.png"><!-- Google --><meta name="google-site-verification" content="Nax5qJbDjGM1csEKyBZpz9fu0fiEEsj_NhaR6VD5AYE"><!-- Structured Data --><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","datePublished":"2026-01-20","description":"A classic engineering trade-off: Convenience vs. Stability. Why SELECT * is a landmine in production applications, especially in Go.","headline":"Why you shouldn't use SELECT * in production | Maciej Adamski","image":"https://maciejadamski.com/static/og-image.png","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://maciejadamski.com/static/logos/logo.svg"},"name":"Maciej Adamski"},"url":"https://maciejadamski.com/blog/no-select-star/"}</script><!-- Tailwind CSS --><script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script><script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script><style>
+				:root {
+					--font-sans: 'JetBrains Mono', monospace;
+					--font-mono: 'JetBrains Mono', monospace;
+					--color-white: #e4e4e5;
+					--color-white-pure: #ffffff;
+					--color-gray: #909093;
+					--color-link: #b2c3ff;
+					--color-surface: #343438;
+					--color-page-background: #1c1c1d;
+					--color-border: #39393b;
+					--color-border-dark: #333333;
+					--color-scrollbar: #555555;
+					--radius-container: 12px;
+				}
+			</style><style type="text/tailwindcss">
+				@theme {
+						--font-sans: var(--font-sans);
+						--font-mono: var(--font-mono);
+						--color-white: var(--color-white);
+						--color-gray: var(--color-gray);
+						--color-link: var(--color-link);
+						--color-surface: var(--color-surface);
+						--color-page-background: var(--color-page-background);
+						--color-border: var(--color-border);
+				}
+			</style><!-- Analytics --><script async src="https://www.googletagmanager.com/gtag/js?id=G-8N2WJRPVCH"></script><script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-8N2WJRPVCH');</script></head><body class="bg-page-background font-mono text-white text-base min-h-full flex flex-col"><header class="absolute inset-x-0 top-0 z-50"><nav aria-label="Global" class="mx-auto max-w-7xl flex items-center justify-between p-4 lg:px-8"><div class="flex lg:flex-1"><a href="/" class="-m-1.5 p-1.5 text-white"><span class="block text-2xl font-bold leading-none tracking-tight"><span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span></span> <span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span></a></div><div class="flex lg:hidden"><button type="button" command="show-modal" commandfor="mobile-menu" class="-m-2.5 inline-flex items-center justify-center rounded-md p-2.5 text-gray"><span class="sr-only">Open main menu</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6"><path d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></div><div class="hidden lg:flex lg:gap-x-12"><a href="/blog/" class="text-sm/6 font-semibold text-link underline underline-offset-4">/blog</a> <a href="/#contact" class="text-sm/6 font-semibold text-link underline underline-offset-4">/contact</a></div></nav></header><el-dialog><dialog id="mobile-menu" class="fixed inset-0 m-0 w-full max-w-none border-0 bg-transparent p-0 backdrop:bg-transparent lg:hidden"><div tabindex="0" class="fixed inset-0"><el-dialog-panel class="fixed inset-y-0 right-0 z-50 w-full overflow-y-auto bg-surface p-4 sm:max-w-sm"><div class="flex items-center justify-between"><a href="/" class="-m-1.5 p-1.5 text-white"><span class="block text-2xl font-bold leading-none tracking-tight"><span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span></span> <span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span></a> <button type="button" command="close" commandfor="mobile-menu" class="-m-2.5 rounded-md p-2.5 text-gray"><span class="sr-only">Close menu</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6"><path d="M6 18 18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></div><div class="mt-6 flow-root"><div class="-my-6 divide-y divide-gray-500/10"><div class="space-y-2 py-6"><a href="/blog/" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/blog</a> <a href="/#contact" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/contact</a></div></div></div></el-dialog-panel></div></dialog></el-dialog><main class="flex-1"><article class="max-w-3xl mx-auto py-24"><header class="mb-12"><h1 class="text-4xl font-semibold tracking-tight leading-tight mb-4">Why you shouldn&#39;t use SELECT * in production</h1><div class="flex gap-4 text-gray text-sm"><span>January 20, 2026</span></div></header><div class="prose prose-invert max-w-none"><p><strong>TL;DR:</strong> Using <code>SELECT *</code> in production is a high-interest loan on your future stability. In Go, it leads to silent crashes during schema changes, destroys database performance by bypassing indexes, and creates &quot;dark code&quot; that is impossible to refactor. Use explicit column lists and low-abstraction drivers like <code>pgx</code> to keep your system predictable.</p>
+<hr>
+<p>In a quick prototype or a local script, <code>SELECT *</code> feels like a shortcut. It’s easy and fast. But in a production Go application, that shortcut is a landmine waiting for a teammate to step on it.</p>
+<p>Software engineering is the art of making trade-offs. While <code>SELECT *</code> offers <strong>convenience</strong>, it sacrifices <strong>stability</strong>. Here is why high-level engineering requires explicit column selection.</p>
+<h2>The &quot;positional scan&quot; crash</h2>
+<p>In Go, the standard <code>database/sql</code> package—and even lower-level drivers—are remarkably literal. When you use <code>row.Scan()</code>, the program doesn't look at column names; it only sees the <strong>order</strong> of the data coming off the wire.</p>
+<ul>
+<li><strong>The implicit contract:</strong> Your code expects Column 1 to be an <code>ID</code> (int) and Column 2 to be an <code>Email</code> (string).</li>
+<li><strong>The fragile reality:</strong> If a teammate runs a migration—perhaps adding a <code>MiddleName</code> column between <code>ID</code> and <code>Email</code>—your code will blindly try to shove a string into an integer variable.</li>
+</ul>
+<p><strong>The result:</strong> Your application crashes in production with a type mismatch error. By explicitly listing your columns, you guarantee the order of the data, making your logic immune to schema changes.</p>
+<h2>Hidden performance killers: the pipeline view</h2>
+<p>Engineering isn't just about how fast a query runs on the database; it’s about the entire data pipeline.</p>
+<h3>Network and memory bloat</h3>
+<p>Your <code>users</code> table might be lean today. But what happens when someone adds a <code>profile_picture_blob</code> or a massive <code>metadata</code> JSON field? If you use <code>SELECT *</code>, you are now dragging megabytes of unnecessary data across the network and deserializing it into memory for every single query—even if you only needed a username.</p>
+<h3>The &quot;covering index&quot; hit</h3>
+<p>This is the Staff-level &quot;why.&quot; Databases are fast because of <strong>indexes</strong>. A &quot;Covering Index&quot; allows the database to answer your query using only the index, without ever touching the actual table (the &quot;heap&quot;).</p>
+<p>When you use <code>SELECT *</code>, you force the database to fetch every single column from the heap. You effectively kill the database’s ability to stay in its &quot;fast lane,&quot; turning a millisecond operation into a disk-I/O bottleneck.</p>
+<h2>The &quot;greppability&quot; test</h2>
+<p>Code must be searchable. Imagine you are tasked with renaming a column or deprecating a field.</p>
+<p>If you explicitly list <code>email_address</code> in your SQL queries, a simple <code>grep</code> or &quot;Find Usages&quot; in your IDE will show you exactly which parts of your Go application are affected. If you use <code>SELECT *</code>, your code becomes a <strong>black box</strong>. You have no way of knowing which fields are actually used by the business logic without running the code and hoping for the best.</p>
+<p><strong>Explicit code is maintainable code.</strong></p>
+<h2>Why I use <code>pgx</code> over &quot;magic&quot; frameworks</h2>
+<p>Choosing a tool like <strong><code>pgx</code></strong> over a heavy ORM follows the philosophy of <strong>&quot;Simple, not easy.&quot;</strong></p>
+<ul>
+<li><strong>Performance:</strong> <code>pgx</code> supports PostgreSQL-specific features like binary protocol and <code>COPY</code> that generic wrappers hide.</li>
+<li><strong>Transparency:</strong> The SQL you write is the SQL that runs. There are no &quot;hidden&quot; queries generated by a library behind your back.</li>
+<li><strong>Granular control:</strong> It gives you PostgreSQL-specific error codes, making it easy to distinguish a connection timeout from a constraint violation.</li>
+</ul>
+<h2>Before &amp; after: the landmine vs. the contract</h2>
+<h3>❌ The &quot;landmine&quot; (fragile)</h3>
+<pre><code class="language-go">func GetUser(ctx context.Context, db *pgx.Conn, id int) (*User, error) {
+    var u User
+    // DANGER: If the DB schema changes order, this will fail or corrupt data.
+    err := db.QueryRow(ctx, &quot;SELECT * FROM users WHERE id=$1&quot;, id).Scan(
+        &amp;u.ID, 
+        &amp;u.Email, 
+        &amp;u.Name,
+    )
+    return &amp;u, err
+}
+✅ The &quot;contract&quot; (robust)
+Go
+
+const userFields = &quot;id, email, name&quot;
+
+func GetUser(ctx context.Context, db *pgx.Conn, id int) (*User, error) {
+    var u User
+    query := fmt.Sprintf(&quot;SELECT %s FROM users WHERE id=$1&quot;, userFields)
+    
+    // Explicit list: even if the table grows to 100 columns, this remains fast.
+    err := db.QueryRow(ctx, query, id).Scan(
+        &amp;u.ID, 
+        &amp;u.Email, 
+        &amp;u.Name,
+    )
+    
+    if err != nil {
+        return nil, fmt.Errorf(&quot;fetch user: %w&quot;, err)
+    }
+    return &amp;u, nil
+}
+</code></pre>
+<h2>Summary</h2>
+<p>A junior engineer writes code that works today. A Senior engineer writes code that works three years from now, even after dozens of schema migrations.</p>
+<p>Avoid SELECT *. Be explicit. Treat your SQL as a strict contract, and your production environment will thank you.</p>
+</div><footer class="mt-16 pt-8 border-t border-border"><a href="/blog/" class="text-sm font-semibold text-link underline underline-offset-4"><span aria-hidden="true">&larr;</span> Back to blog</a></footer></article></main><footer class="border-t border-border"><div class="mx-auto max-w-7xl px-6 py-16 flex items-center justify-center lg:px-8"><p class="text-center text-xs leading-5 text-gray">&copy; 2026 Maciej Adamski. All rights reserved.</p></div></footer></body></html>
+
+==================================================
+FILE: website/dist/blog/why-i-stopped-using-hover-and-transition-effects/index.html
+==================================================
+<!doctype html><html lang="en" class="dark h-full antialiased overflow-y-scroll"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><!-- Fonts: JetBrains Mono --><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100..800&display=swap" rel="stylesheet"><!-- Custom CSS --><link rel="stylesheet" href="/static/css/prose.css"><link rel="icon" href="/static/favicon.ico" type="image/x-icon"><title>Why I stopped using hover and transition effects | Maciej Adamski</title><meta name="description" content="In a mobile-first world, hover and transition effects are mostly dead code. Why I prefer simpler Tailwind, faster pages, and better readability."><link rel="canonical" href="https://maciejadamski.com/blog/why-i-stopped-using-hover-and-transition-effects/"><meta name="robots" content="index,follow"><!-- Open Graph --><meta property="og:type" content="article"><meta property="og:url" content="https://maciejadamski.com/blog/why-i-stopped-using-hover-and-transition-effects/"><meta property="og:title" content="Why I stopped using hover and transition effects | Maciej Adamski"><meta property="og:description" content="In a mobile-first world, hover and transition effects are mostly dead code. Why I prefer simpler Tailwind, faster pages, and better readability."><meta property="og:image" content="https://maciejadamski.com/static/og-image.png"><meta property="og:site_name" content="Maciej Adamski"><!-- Twitter --><meta name="twitter:card" content="summary"><meta name="twitter:title" content="Why I stopped using hover and transition effects | Maciej Adamski"><meta name="twitter:description" content="In a mobile-first world, hover and transition effects are mostly dead code. Why I prefer simpler Tailwind, faster pages, and better readability."><meta name="twitter:image" content="https://maciejadamski.com/static/og-image.png"><!-- Google --><meta name="google-site-verification" content="Nax5qJbDjGM1csEKyBZpz9fu0fiEEsj_NhaR6VD5AYE"><!-- Structured Data --><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","datePublished":"2026-01-23","description":"In a mobile-first world, hover and transition effects are mostly dead code. Why I prefer simpler Tailwind, faster pages, and better readability.","headline":"Why I stopped using hover and transition effects | Maciej Adamski","image":"https://maciejadamski.com/static/og-image.png","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://maciejadamski.com/static/logos/logo.svg"},"name":"Maciej Adamski"},"url":"https://maciejadamski.com/blog/why-i-stopped-using-hover-and-transition-effects/"}</script><!-- Tailwind CSS --><script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script><script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script><style>
+				:root {
+					--font-sans: 'JetBrains Mono', monospace;
+					--font-mono: 'JetBrains Mono', monospace;
+					--color-white: #e4e4e5;
+					--color-white-pure: #ffffff;
+					--color-gray: #909093;
+					--color-link: #b2c3ff;
+					--color-surface: #343438;
+					--color-page-background: #1c1c1d;
+					--color-border: #39393b;
+					--color-border-dark: #333333;
+					--color-scrollbar: #555555;
+					--radius-container: 12px;
+				}
+			</style><style type="text/tailwindcss">
+				@theme {
+						--font-sans: var(--font-sans);
+						--font-mono: var(--font-mono);
+						--color-white: var(--color-white);
+						--color-gray: var(--color-gray);
+						--color-link: var(--color-link);
+						--color-surface: var(--color-surface);
+						--color-page-background: var(--color-page-background);
+						--color-border: var(--color-border);
+				}
+			</style><!-- Analytics --><script async src="https://www.googletagmanager.com/gtag/js?id=G-8N2WJRPVCH"></script><script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-8N2WJRPVCH');</script></head><body class="bg-page-background font-mono text-white text-base min-h-full flex flex-col"><header class="absolute inset-x-0 top-0 z-50"><nav aria-label="Global" class="mx-auto max-w-7xl flex items-center justify-between p-4 lg:px-8"><div class="flex lg:flex-1"><a href="/" class="-m-1.5 p-1.5 text-white"><span class="block text-2xl font-bold leading-none tracking-tight"><span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span></span> <span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span></a></div><div class="flex lg:hidden"><button type="button" command="show-modal" commandfor="mobile-menu" class="-m-2.5 inline-flex items-center justify-center rounded-md p-2.5 text-gray"><span class="sr-only">Open main menu</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6"><path d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></div><div class="hidden lg:flex lg:gap-x-12"><a href="/blog/" class="text-sm/6 font-semibold text-link underline underline-offset-4">/blog</a> <a href="/#contact" class="text-sm/6 font-semibold text-link underline underline-offset-4">/contact</a></div></nav></header><el-dialog><dialog id="mobile-menu" class="fixed inset-0 m-0 w-full max-w-none border-0 bg-transparent p-0 backdrop:bg-transparent lg:hidden"><div tabindex="0" class="fixed inset-0"><el-dialog-panel class="fixed inset-y-0 right-0 z-50 w-full overflow-y-auto bg-surface p-4 sm:max-w-sm"><div class="flex items-center justify-between"><a href="/" class="-m-1.5 p-1.5 text-white"><span class="block text-2xl font-bold leading-none tracking-tight"><span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span></span> <span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span></a> <button type="button" command="close" commandfor="mobile-menu" class="-m-2.5 rounded-md p-2.5 text-gray"><span class="sr-only">Close menu</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6"><path d="M6 18 18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></div><div class="mt-6 flow-root"><div class="-my-6 divide-y divide-gray-500/10"><div class="space-y-2 py-6"><a href="/blog/" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/blog</a> <a href="/#contact" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/contact</a></div></div></div></el-dialog-panel></div></dialog></el-dialog><main class="flex-1"><article class="max-w-3xl mx-auto py-24"><header class="mb-12"><h1 class="text-4xl font-semibold tracking-tight leading-tight mb-4">Why I stopped using hover and transition effects</h1><div class="flex gap-4 text-gray text-sm"><span>January 23, 2026</span></div></header><div class="prose prose-invert max-w-none"><p>In a mobile-first world, fancy UI is just technical debt</p>
+<h2><strong>The readability tax</strong></h2>
+<p>I use TailwindCSS for every project; it offers total control without leaving the HTML. But that control comes with a price: <strong>visual noise</strong>. Between layout, spacing, and typography, a single button can easily carry ten classes; when you add &quot;hover,&quot; &quot;transition-all,&quot; and &quot;duration-300,&quot; you are not just styling; you are cluttering. You are making the code harder to read for a feature most users will never see.</p>
+<h2><strong>The bloat of a single button</strong></h2>
+<p>Consider a standard &quot;get started&quot; button. To make it functional, accessible, and &quot;pretty&quot; by modern standards, your HTML looks like this:</p>
+<pre><code class="language-html">&lt;div class=&quot;mt-10 flex items-center justify-center gap-x-6&quot;&gt;
+  &lt;a href=&quot;#&quot; class=&quot;rounded-md bg-indigo-500 px-3.5 py-2.5 text-sm font-semibold text-white shadow-xs transition-all duration-300 ease-in-out hover:bg-indigo-400 hover:scale-105 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500&quot;&gt;
+    Get started
+  &lt;/a&gt;
+  &lt;a href=&quot;#&quot; class=&quot;text-sm/6 font-semibold text-white&quot;&gt;
+    Learn more &lt;span aria-hidden=&quot;true&quot;&gt;→&lt;/span&gt;
+  &lt;/a&gt;
+&lt;/div&gt;
+</code></pre>
+<p>Look at that class string. Half of those classes; specifically hover:bg-indigo-400, hover:scale-105, transition-all, and duration-300; are desktop ghosts. They exist for a mouse cursor that is not there on a mobile device; by chasing &quot;polish,&quot; we have doubled the length of our code. It is now harder for any developer to scan the file and understand the actual structure of the page.</p>
+<h2><strong>The mobile ghost town</strong></h2>
+<p>We need to stop designing for ourselves; most users visit your site from a phone. Hover effects do not work on mobile; when a user taps a button on a smartphone, the &quot;hover&quot; state might flicker for a millisecond; or worse, it gets stuck in a &quot;persistent hover&quot; state that requires a second tap to clear. We are shipping dead code to our users' browsers.</p>
+<p>Transitions and backdrop-blur are even worse; they require the mobile processor to &quot;repaint&quot; the screen constantly. On a budget smartphone, this does not look smooth; it looks like &quot;jank.&quot; It makes your premium UI feel like a cheap toy.</p>
+<h2><strong>The Amazon paradox: brutalist utility</strong></h2>
+<p>If &quot;pretty&quot; was the secret to success, Amazon would have gone bankrupt a decade ago. The Amazon UI looks like a relic from the 90s; it is &quot;ugly&quot; by design school standards. But Amazon understands something most designers forget: users do not visit your site to admire the buttons. They are there to solve a problem.</p>
+<p>Amazon spent millions to learn that:</p>
+<ul>
+<li><strong>Predictability beats novelty:</strong> Users know exactly where the &quot;Add to Cart&quot; button is.</li>
+<li><strong>Speed is a feature:</strong> Every millisecond of delay costs them money.</li>
+<li><strong>Consistency creates trust:</strong> When a system works the same way every time, users feel safe.</li>
+</ul>
+<p>They do not change their UI to match the latest trends; they know it adds zero value to the customer’s mission.</p>
+<h2><strong>Simple is hard (but better)</strong></h2>
+<p>A senior engineer’s value is not measured by how many fancy CSS tricks they can cram into a tag; it is measured by how much value they deliver with the least amount of complexity.</p>
+<ul>
+<li><strong>Prioritize focus over hover:</strong> Spend your time on focus-visible and accessibility; that helps everyone.</li>
+<li><strong>Prioritize speed over polish:</strong> A site that loads in 500ms with a &quot;90s design&quot; will always have a better UX than a &quot;modern&quot; site that takes 3 seconds to animate in.</li>
+<li><strong>Prioritize readability over control:</strong> Keep your Tailwind classes lean; if you do not need the transition, delete it.</li>
+</ul>
+<h2>Summary</h2>
+<p>Stop building for your desktop monitor; keep your UI clean, minimal, and lightning-fast. In a world of &quot;fancy&quot; technical debt, simplicity is the ultimate competitive advantage.</p>
+</div><footer class="mt-16 pt-8 border-t border-border"><a href="/blog/" class="text-sm font-semibold text-link underline underline-offset-4"><span aria-hidden="true">&larr;</span> Back to blog</a></footer></article></main><footer class="border-t border-border"><div class="mx-auto max-w-7xl px-6 py-16 flex items-center justify-center lg:px-8"><p class="text-center text-xs leading-5 text-gray">&copy; 2026 Maciej Adamski. All rights reserved.</p></div></footer></body></html>
+
+==================================================
+FILE: website/dist/index.html
+==================================================
+<!doctype html><html lang="en" class="dark h-full antialiased overflow-y-scroll"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><!-- Fonts: JetBrains Mono --><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100..800&display=swap" rel="stylesheet"><!-- Custom CSS --><link rel="stylesheet" href="/static/css/prose.css"><link rel="icon" href="/static/favicon.ico" type="image/x-icon"><title>Maciej Adamski - Software Engineer, Go Enthusiast, and Founder of Dataglitch.</title><meta name="description" content="Software Engineer, Go Enthusiast, and Founder of Dataglitch."><link rel="canonical" href="https://maciejadamski.com/"><meta name="robots" content="index,follow"><!-- Open Graph --><meta property="og:type" content="website"><meta property="og:url" content="https://maciejadamski.com/"><meta property="og:title" content="Maciej Adamski - Software Engineer, Go Enthusiast, and Founder of Dataglitch."><meta property="og:description" content="Software Engineer, Go Enthusiast, and Founder of Dataglitch."><meta property="og:image" content="https://maciejadamski.com/static/og-image.png"><meta property="og:site_name" content="Maciej Adamski"><!-- Twitter --><meta name="twitter:card" content="summary"><meta name="twitter:title" content="Maciej Adamski - Software Engineer, Go Enthusiast, and Founder of Dataglitch."><meta name="twitter:description" content="Software Engineer, Go Enthusiast, and Founder of Dataglitch."><meta name="twitter:image" content="https://maciejadamski.com/static/og-image.png"><!-- Google --><meta name="google-site-verification" content="Nax5qJbDjGM1csEKyBZpz9fu0fiEEsj_NhaR6VD5AYE"><!-- Structured Data --><script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","description":"Software Engineer, Go Enthusiast, and Founder of Dataglitch.","logo":"https://maciejadamski.com/static/logos/logo.svg","name":"Maciej Adamski","url":"https://maciejadamski.com"}</script><!-- Tailwind CSS --><script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script><script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script><style>
+				:root {
+					--font-sans: 'JetBrains Mono', monospace;
+					--font-mono: 'JetBrains Mono', monospace;
+					--color-white: #e4e4e5;
+					--color-white-pure: #ffffff;
+					--color-gray: #909093;
+					--color-link: #b2c3ff;
+					--color-surface: #343438;
+					--color-page-background: #1c1c1d;
+					--color-border: #39393b;
+					--color-border-dark: #333333;
+					--color-scrollbar: #555555;
+					--radius-container: 12px;
+				}
+			</style><style type="text/tailwindcss">
+				@theme {
+						--font-sans: var(--font-sans);
+						--font-mono: var(--font-mono);
+						--color-white: var(--color-white);
+						--color-gray: var(--color-gray);
+						--color-link: var(--color-link);
+						--color-surface: var(--color-surface);
+						--color-page-background: var(--color-page-background);
+						--color-border: var(--color-border);
+				}
+			</style><!-- Analytics --><script async src="https://www.googletagmanager.com/gtag/js?id=G-8N2WJRPVCH"></script><script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-8N2WJRPVCH');</script></head><body class="bg-page-background font-mono text-white text-base min-h-full flex flex-col"><header class="absolute inset-x-0 top-0 z-50"><nav aria-label="Global" class="mx-auto max-w-7xl flex items-center justify-between p-4 lg:px-8"><div class="flex lg:flex-1"><a href="/" class="-m-1.5 p-1.5 text-white"><span class="block text-2xl font-bold leading-none tracking-tight"><span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span></span> <span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span></a></div><div class="flex lg:hidden"><button type="button" command="show-modal" commandfor="mobile-menu" class="-m-2.5 inline-flex items-center justify-center rounded-md p-2.5 text-gray"><span class="sr-only">Open main menu</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6"><path d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></div><div class="hidden lg:flex lg:gap-x-12"><a href="/blog/" class="text-sm/6 font-semibold text-link underline underline-offset-4">/blog</a> <a href="/#contact" class="text-sm/6 font-semibold text-link underline underline-offset-4">/contact</a></div></nav></header><el-dialog><dialog id="mobile-menu" class="fixed inset-0 m-0 w-full max-w-none border-0 bg-transparent p-0 backdrop:bg-transparent lg:hidden"><div tabindex="0" class="fixed inset-0"><el-dialog-panel class="fixed inset-y-0 right-0 z-50 w-full overflow-y-auto bg-surface p-4 sm:max-w-sm"><div class="flex items-center justify-between"><a href="/" class="-m-1.5 p-1.5 text-white"><span class="block text-2xl font-bold leading-none tracking-tight"><span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span></span> <span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span></a> <button type="button" command="close" commandfor="mobile-menu" class="-m-2.5 rounded-md p-2.5 text-gray"><span class="sr-only">Close menu</span> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6"><path d="M6 18 18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></div><div class="mt-6 flow-root"><div class="-my-6 divide-y divide-gray-500/10"><div class="space-y-2 py-6"><a href="/blog/" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/blog</a> <a href="/#contact" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/contact</a></div></div></div></el-dialog-panel></div></dialog></el-dialog><main class="flex-1"> <section class="relative isolate px-6 lg:px-8"><div class="mx-auto max-w-3xl py-32 lg:py-56"><div class="text-left"><h1 class="text-4xl font-semibold tracking-tight leading-tight text-white sm:text-6xl">Hello!<br><span class="text-white">I'm Maciej Adamski</span></h1><p class="mt-6 text-base/7 text-white">Software Engineer. Proud Father. Lifelong Learner.</p><p class="mt-4 text-base/7 text-gray">I build reliable software systems and explore the ideas that make us better humans.</p><p class="mt-4 text-base/7 text-gray">Welcome to my digital garden. 🌱</p><div class="mt-10 flex flex-col items-start md:flex-row md:items-center gap-6"><a href="/blog/" class="text-base font-semibold text-link underline underline-offset-4">Read my Blog</a> <a href="https://www.linkedin.com/in/maciejadamski89/" target="_blank" class="text-base font-semibold text-link underline underline-offset-4">Connect with me on LinkedIn <span aria-hidden="true">&rarr;</span></a></div></div></div></section> <section id="about" class="py-24 px-6"><div class="max-w-3xl mx-auto"><h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>whoami<span class="text-link">_</span></h2><div class="space-y-6 text-base/7 text-gray"><p>I am a software engineer driven by curiosity. My professional world revolves around the Go and Python ecosystems, where I focus on backend architecture, data tooling, and pragmatic automation. I like building things that work quietly and reliably.</p><p>But code is just one part of the equation.</p><p>I am also a proud dad, an animal lover, a musician, a gamer, and a reader of mind-changing books. I believe that the principles of good engineering, clarity, patience, and continuous improvement, apply just as well to fatherhood and personal growth.</p><p>On this site, I share what I’m learning from books, bugs, and life.</p></div></div></section> <section id="dataglitch" class="py-24 px-6"><div class="max-w-3xl mx-auto"><img src="/static/logos/dataglitch.png" alt="Dataglitch Logo" class="w-32 mb-8"><div class="space-y-6 text-base/7 text-gray"><p>I am the founder of <span class="text-white font-semibold">Dataglitch</span>, a strategic partner for digital evolution. We transform complex business challenges into cohesive, scalable software solutions.</p><p>Our mission is to deliver innovative, high-quality systems that go beyond expectations. We don’t just build technology, we engineer systems designed for performance, simplicity, and seamless integration.</p><p>Whether you need to launch a vision faster with an MVP, transform data into your most valuable asset, or build on a rock-solid foundation, we are the partner you can trust.</p><div class="mt-4"><a href="https://dataglit.ch/" target="_blank" class="text-base font-semibold text-link underline underline-offset-4">Visit Dataglitch <span aria-hidden="true">&rarr;</span></a></div></div></div></section> <section id="partners" class="py-24 px-6"><div class="max-w-3xl mx-auto"><h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>business_partners<span class="text-link">_</span></h2><p class="text-base/7 text-gray mb-10">Great work is rarely done in isolation. I am proud to collaborate with these exceptional leaders and companies who share a commitment to quality, innovation, and integrity.</p><div class="grid grid-cols-1 md:grid-cols-2 gap-6"><div class="p-6 border border-border rounded-lg bg-surface/50"><h3 class="text-lg font-semibold text-white">Johnsey Kivoto</h3><p class="text-sm text-gray mb-4">CEO at <a href="https://www.linkedin.com/company/defend-technologies/" target="_blank" class="text-link hover:underline">Defend Technologies</a></p><div class="mt-auto"><a href="https://www.linkedin.com/in/kivotoj/" target="_blank" class="text-sm font-semibold text-link underline underline-offset-4">LinkedIn Profile <span aria-hidden="true">&rarr;</span></a></div></div><div class="p-6 border border-border rounded-lg bg-surface/50"><h3 class="text-lg font-semibold text-white">David Kimutai</h3><p class="text-sm text-gray mb-4">Co-CEO at <span>BINI</span></p><div class="mt-auto"><a href="https://www.linkedin.com/in/kipdavids/" target="_blank" class="text-sm font-semibold text-link underline underline-offset-4">LinkedIn Profile <span aria-hidden="true">&rarr;</span></a></div></div><div class="p-6 border border-border rounded-lg bg-surface/50"><h3 class="text-lg font-semibold text-white">Martin Kavili</h3><p class="text-sm text-gray mb-4">Co-CEO at <span>BINI</span></p><div class="mt-auto"><a href="https://www.linkedin.com/in/mkavili/" target="_blank" class="text-sm font-semibold text-link underline underline-offset-4">LinkedIn Profile <span aria-hidden="true">&rarr;</span></a></div></div></div></div></section>  <section id="philosophy" class="py-24 px-6"><div class="max-w-3xl mx-auto"><h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>coding_philosophy<span class="text-link">_</span></h2><div class="space-y-6 text-base/7 text-gray"><p><span class="text-white font-semibold">Less is More.</span></p><p>I believe that complexity is the enemy of reliability. My approach to engineering (and life) is built on five core principles:</p><ul class="list-disc pl-6 space-y-4"><li><span class="text-white font-semibold">Simplicity is the Goal.</span> "Make things as simple as possible, but not simpler." I prefer boring, predictable code over clever hacks.</li><li><span class="text-white font-semibold">Performance IS User Experience.</span> A beautiful interface means nothing if it’s slow. I prioritize raw speed and efficiency over fancy UI layers.</li><li><span class="text-white font-semibold">Code is a Liability.</span> The best code is the code I didn't have to write. I practice YAGNI (You Ain't Gonna Need It) ruthlessly.</li><li><span class="text-white font-semibold">Fail Fast, Fail Loud.</span> I handle errors explicitly. Systems should crash immediately when something is wrong, rather than limping along with hidden bugs.</li><li><span class="text-white font-semibold">Observability First.</span> If you can't measure it, you don't control it. Logs and metrics are not an afterthought; they are part of the product.</li></ul></div></div></section> <section id="tech" class="py-24 px-6"><div class="max-w-3xl mx-auto"><h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>my_tech_stack<span class="text-link">_</span></h2><p class="text-gray text-base/7 mb-10">A snapshot of the stack I use and the tools I reach for.</p><div class="space-y-8"><div><h3 class="text-sm uppercase tracking-widest text-gray mb-4">Frontend</h3><ul class="flex flex-wrap gap-3 text-sm"><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://htmx.org/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">HTMX</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://alpinejs.dev/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">Alpine.js</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://tailwindcss.com/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">Tailwind CSS</a></li></ul></div><div><h3 class="text-sm uppercase tracking-widest text-gray mb-4">Backend</h3><ul class="flex flex-wrap gap-3 text-sm"><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://go.dev/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">Go</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://templ.guide/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">Templ</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://www.python.org/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">Python</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://www.djangoproject.com/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">Django</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://fastapi.tiangolo.com/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">FastAPI</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://flask.palletsprojects.com/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">Flask</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://www.postgresql.org/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">PostgreSQL</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://www.mongodb.com/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">MongoDB</a></li></ul></div><div><h3 class="text-sm uppercase tracking-widest text-gray mb-4">Cloud &amp; Infra</h3><ul class="flex flex-wrap gap-3 text-sm"><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://www.docker.com/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">Docker</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://kubernetes.io/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">Kubernetes</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://www.terraform.io/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">Terraform</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://cloud.google.com/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">Google Cloud</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://github.com/features/actions" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">GitHub Actions</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://www.gnu.org/software/make/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">Make</a></li></ul></div><div><h3 class="text-sm uppercase tracking-widest text-gray mb-4">Platform</h3><ul class="flex flex-wrap gap-3 text-sm"><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://firebase.google.com/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">Firebase</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://www.cloudflare.com/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">Cloudflare</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://stripe.com/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">Stripe</a></li></ul></div><div><h3 class="text-sm uppercase tracking-widest text-gray mb-4">Tooling</h3><ul class="flex flex-wrap gap-3 text-sm"><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://www.jetbrains.com/go/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">JetBrains GoLand</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://code.visualstudio.com/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">VS Code</a></li><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://www.vim.org/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">VIM</a></li></ul></div><div><h3 class="text-sm uppercase tracking-widest text-gray mb-4">Operating System</h3><ul class="flex flex-wrap gap-3 text-sm"><li class="px-3 py-1 rounded-full border border-border text-gray"><a href="https://ubuntu.com/" target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">Ubuntu</a></li></ul></div></div></div></section> <section class="pt-24 pb-36 px-6"><div class="max-w-3xl mx-auto"><h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>latest_thoughts<span class="text-link">_</span></h2><div class="divide-y divide-border"><article class="py-8 first:pt-0"><div class="flex items-center gap-x-4 text-sm"><time datetime="2026-01-23" class="text-gray">January 23, 2026</time></div><div class="relative"><h3 class="mt-3 text-lg/8 font-semibold text-white"><a href="/blog/why-i-stopped-using-hover-and-transition-effects/" class="text-link underline underline-offset-4"><span class="absolute inset-0"></span> Why I stopped using hover and transition effects</a></h3><p class="mt-5 line-clamp-3 text-base/7 text-gray">In a mobile-first world, hover and transition effects are mostly dead code. Why I prefer simpler Tailwind, faster pages, and better readability.</p></div></article><article class="py-8 first:pt-0"><div class="flex items-center gap-x-4 text-sm"><time datetime="2026-01-22" class="text-gray">January 22, 2026</time></div><div class="relative"><h3 class="mt-3 text-lg/8 font-semibold text-white"><a href="/blog/middleman-tax-ditch-google-tag-manager/" class="text-link underline underline-offset-4"><span class="absolute inset-0"></span> Why developers should ditch Google Tag Manager</a></h3><p class="mt-5 line-clamp-3 text-base/7 text-gray">In modern web development, there is a constant tension between marketing agility and engineering reality. GTM is often a Trojan horse. Here is why you should cut out the middleman.</p></div></article><article class="py-8 first:pt-0"><div class="flex items-center gap-x-4 text-sm"><time datetime="2026-01-21" class="text-gray">January 21, 2026</time></div><div class="relative"><h3 class="mt-3 text-lg/8 font-semibold text-white"><a href="/blog/cleaning-digital-attic-cloudflare-pages/" class="text-link underline underline-offset-4"><span class="absolute inset-0"></span> Cleaning the digital attic; automating Cloudflare Pages with Go</a></h3><p class="mt-5 line-clamp-3 text-base/7 text-gray">A concurrency-first Go utility to clean up old Cloudflare Pages deployments safely and fast.</p></div></article></div><div class="mt-12"><a href="/blog/" class="pt-12 text-base font-semibold text-link underline underline-offset-4">Check out all of my blog posts <span aria-hidden="true">&rarr;</span></a></div></div></section> <section id="contact" class="pt-24 pb-36 px-6"><div class="max-w-3xl mx-auto"><h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>contact<span class="text-link">_</span></h2><p class="text-base/7 text-gray mb-8">I am always open to new connections and challenges. Whether you want to discuss a complex system architecture, need a partner for a new venture, or just want to chat about technology — I’m listening.</p><p class="text-base/7 text-white font-semimedium mb-8">I am confident that I am the right person to help with your challenge.</p><div class="flex justify-start gap-4"><a href="mailto:maciej.adamski@dataglit.ch" class="text-base font-semibold text-link underline underline-offset-4">Email me &rarr;</a> <a href="https://linkedin.com/in/maciejadamski" target="_blank" class="text-base font-semibold text-link underline underline-offset-4">LinkedIn &rarr;</a></div></div></section> <section class="py-12 px-6 border-t border-border bg-surface"><div class="max-w-3xl mx-auto text-center"><p class="text-white text-base"><a href="https://github.com/dg-dataglitch/maciejadamski.com" target="_blank" class="text-link underline underline-offset-4">You can find the code for this website here</a></p></div></section></main><footer class="border-t border-border"><div class="mx-auto max-w-7xl px-6 py-16 flex items-center justify-center lg:px-8"><p class="text-center text-xs leading-5 text-gray">&copy; 2026 Maciej Adamski. All rights reserved.</p></div></footer></body></html>
+
+==================================================
+FILE: website/dist/robots.txt
+==================================================
+User-agent: *
+Allow: /
+
+Sitemap: https://maciejadamski.com/sitemap.xml
+
+
+==================================================
+FILE: website/dist/sitemap.xml
+==================================================
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://maciejadamski.com/</loc>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://maciejadamski.com/blog/</loc>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://maciejadamski.com/blog/why-i-stopped-using-hover-and-transition-effects/</loc>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://maciejadamski.com/blog/middleman-tax-ditch-google-tag-manager/</loc>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://maciejadamski.com/blog/cleaning-digital-attic-cloudflare-pages/</loc>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://maciejadamski.com/blog/no-select-star/</loc>
+    <priority>0.6</priority>
+  </url>
+</urlset>
+
+
+==================================================
+FILE: website/dist/static/css/prose.css
+==================================================
+/* Prose styles for markdown content with strict B&W minimalism */
+.prose {
+        color: var(--color-gray);
+        line-height: 1.75;
+        max-width: 48rem;
+        font-family: var(--font-mono);
+}
+
+.prose a {
+        color: var(--color-link);
+        text-decoration: underline;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6 {
+        color: var(--color-white);
+        font-weight: 700;
+        line-height: 1.3;
+}
+
+.prose strong {
+        color: var(--color-white-pure);
+        font-weight: 800;
+}
+
+.prose h1 {
+        font-size: 2.25rem;
+        margin-top: 2.5rem;
+        margin-bottom: 2rem;
+}
+
+.prose h2 {
+        font-size: 1.5rem;
+        margin-top: 3.5rem;
+        margin-bottom: 1.5rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid var(--color-border);
+}
+
+.prose h3 {
+        font-size: 1.25rem;
+        margin-top: 2.5rem;
+        margin-bottom: 1rem;
+}
+
+.prose h4 {
+        font-size: 1.125rem;
+        margin-top: 2rem;
+        margin-bottom: 0.75rem;
+}
+
+.prose p {
+        margin-bottom: 1.75rem;
+        line-height: 1.8;
+}
+
+.prose ul,
+.prose ol {
+        margin-top: 1.5rem;
+        margin-bottom: 1.5rem;
+        padding-left: 1.625rem;
+}
+
+.prose ul > li,
+.prose ol > li {
+        margin-top: 0.75rem;
+        margin-bottom: 0.75rem;
+        padding-left: 0.375rem;
+}
+
+.prose ul > li::marker {
+        color: var(--color-gray);
+}
+
+.prose ol > li::marker {
+        color: var(--color-gray);
+}
+
+.prose pre {
+        background-color: var(--color-surface);
+        border: 1px solid var(--color-border);
+        color: var(--color-white);
+        overflow-x: auto;
+        white-space: pre-wrap; /* Wrap text */
+        word-wrap: break-word; /* Break long words */
+        padding: 1rem;
+        border-radius: var(--radius-container);
+        font-size: 0.875rem;
+        line-height: 1.7142857;
+        margin-top: 1.7142857em;
+        margin-bottom: 1.7142857em;
+        scrollbar-width: thin;
+        scrollbar-color: var(--color-scrollbar) transparent;
+}
+
+.prose code {
+        color: var(--color-white-pure);
+        font-weight: 600;
+        font-size: 0.875em;
+}
+
+.prose pre code {
+        background-color: transparent;
+        border-width: 0;
+        border-radius: 0;
+        padding: 0;
+        font-weight: 400;
+        color: inherit;
+        font-size: inherit;
+        font-family: inherit;
+        line-height: inherit;
+}
+
+.prose hr {
+        margin-top: 3em;
+        margin-bottom: 3em;
+        border-color: var(--color-border-dark);
+}
+
+/* Webkit scrollbar customization */
+.prose pre::-webkit-scrollbar {
+        height: 6px;
+}
+
+.prose pre::-webkit-scrollbar-track {
+        background: transparent;
+}
+
+.prose pre::-webkit-scrollbar-thumb {
+        background-color: var(--color-scrollbar);
+        border-radius: 3px;
+}
+
+
+==================================================
+FILE: website/dist/static/favicon.ico
+==================================================
+[BINARY OR UNREADABLE CONTENT]
+
+
+==================================================
+FILE: website/dist/static/_headers
+==================================================
+# Security Headers
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  X-XSS-Protection: 1; mode=block
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://www.google-analytics.com https://analytics.google.com
+
+# Cache static assets
+/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Cache pages (shorter)
+/*.html
+  Cache-Control: public, max-age=3600
+
+# Favicon
+/static/favicon.png
+  Cache-Control: public, max-age=31536000, immutable
+
+# Sitemap and robots (refresh often)
+/sitemap.xml
+  Cache-Control: public, max-age=86400
+/robots.txt
+  Cache-Control: public, max-age=86400
+
+
+==================================================
+FILE: website/docker/nginx.conf
+==================================================
+server {
+    listen 80;
+    server_name localhost;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Gzip compression
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml;
+
+    # Cache static assets
+    location /static/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # SPA fallback
+    location / {
+        try_files $uri $uri/ $uri.html =404;
+    }
+
+    # Security headers
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+}
+
+
+==================================================
+FILE: website/Dockerfile
+==================================================
+# Build stage
+FROM golang:1.21-alpine AS builder
+
+WORKDIR /app
+
+# Install templ
+RUN go install github.com/a-h/templ/cmd/templ@latest
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source
+COPY . .
+
+# Generate templates and build
+RUN templ generate
+RUN go build -o /app/build ./cmd/build
+
+# Run build
+RUN /app/build
+
+# Production stage - just serve static files
+FROM nginx:alpine
+
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
+
+
+==================================================
+FILE: website/.editorconfig
+==================================================
+# https://editorconfig.org
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.go]
+indent_style = tab
+indent_size = 8
+max_line_length = 120
+
+[*.sh]
+indent_style = space
+indent_size = 8
+max_line_length = 120
+
+[*.{js,css,jsonl}]
+indent_style = space
+indent_size = 8
+max_line_length = 120
+
+[*{yaml,yml,toml}]
+indent_style = space
+indent_size = 4
+
+[*.{html,templ}]
+indent_style = space
+indent_size = 4
+max_line_length = 150
+
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab
+indent_size = 8
+
+
+==================================================
+FILE: website/.env
+==================================================
+# Site Configuration
+SITE_NAME=Maciej Adamski
+SITE_URL=https://maciejadamski.com
+SITE_DESCRIPTION=Software Engineer, Go Enthusiast, and Founder of Dataglitch.
+
+# Server
+HOST=0.0.0.0
+PORT=3000
+
+# SEO & Analytics
+TWITTER_HANDLE=@maciejadamski89
+GOOGLE_TAG_MANAGER_ENABLED=false
+GOOGLE_TAG_MANAGER_ID=GTM-M954Q7DX
+GOOGLE_SEARCH_CONSOLE=Nax5qJbDjGM1csEKyBZpz9fu0fiEEsj_NhaR6VD5AYE
+GOOGLE_ANALYTICS_ID=G-8N2WJRPVCH
+
+# Paths
+DIST_PATH=dist
+CONTENT_PATH=content
+STATIC_PATH=static
+LOG_LEVEL=debug
+
+
+==================================================
+FILE: website/.env.example
+==================================================
+# Site Configuration
+SITE_NAME=My Website
+SITE_URL=https://example.com
+SITE_DESCRIPTION=A modern static website
+
+# Server
+HOST=localhost
+PORT=3000
+
+# SEO & Analytics
+TWITTER_HANDLE=@example
+GOOGLE_TAG_MANAGER_ENABLED=false
+GOOGLE_TAG_MANAGER_ID=
+GOOGLE_SEARCH_CONSOLE=
+GOOGLE_ANALYTICS_ID=
+
+# Paths
+DIST_PATH=dist
+CONTENT_PATH=content
+STATIC_PATH=static
+LOG_LEVEL=info
+
+
+==================================================
+FILE: website/githooks/pre-commit
+==================================================
+#!/bin/sh
+
+echo "------------------------------------------------"
+echo "Running pre-commit hook: make build"
+echo "------------------------------------------------"
+
+# Run the build
+make build
+
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "[FAIL] Build failed! Commit aborted."
+    exit 1
+fi
+
+# Stage the artifacts so they are included in the commit
+git add dist
+
+echo "[OK] Build successful. 'dist' folder staged."
+
+
+==================================================
+FILE: website/.github/copilot-instructions.md
+==================================================
+## My Learning Philosophy (Your Primary Directive)
+
+- I want to write the code by-myself. I want to learn by doing.
+
+- **I will always write the code by my own hands, not by copy-pasting. The more I write, the more I learn.**
+
+- Your role is to be a Socratic guide. Do not write the code for me by default.
+
+### Explicit override: “implement it” mode
+
+- If I explicitly ask you to **implement** (for example: "please implement it", "make the changes", "just do it"), you may directly edit the codebase.
+- When you implement, keep it educational:
+  - Explain the intent of the change and why it’s the simplest approach.
+  - Keep diffs minimal and consistent with existing style.
+  - Tell me exactly how to verify locally (commands + what to look for).
+  - Point me to the key files/symbols to read.
+
+- I want you to guide me, teach me, explain deeply, and provide examples I can refer to. I need guidance and a deep, \*
+  \*engineer-to-engineer discussion\*\*, not just answers.
+
+- I must usually be the one to build and write the final code. Instead of giving me the answer, give me the path to the
+  answer.
+- Exception: when I explicitly request implementation (see “implement it” mode), you may write the code.
+
+- During our activities I will ask questions like: what it does, how it works, what is the purpose.
+
+- **My ultimate goal is to become a high-skilled software engineer, earn money, and deliver the best possible software.
+  **
+
+---
+
+## Your Role
+
+You are an expert-level Staff/Principal Developer, a "coder's mentor." Your sole purpose is to help me write the
+simplest, cleanest, and most maintainable code possible. You are my partner in thinking, refactoring, and debugging.
+
+### The Architect-to-Coder Boundary
+
+Your role is to focus on the "craft" of coding and DevOps. You are not responsible for high-level system architecture. I
+will provide the architectural blueprints (from my "Architecture GEM"), and you will guide me in implementing them into
+the simplest, most maintainable, and best-tested code possible.
+
+---
+
+## Your Mindset
+
+Your mindset is a blend of the masters: You have the "less is more" philosophy of Rob Pike, the "simple vs. easy"
+clarity of Richard Hickey, the anti-complexity "taste" of Linus Torvalds, and the practical refactoring rules of Sandi
+Metz.
+
+---
+
+## My Core Philosophy (Your Secondary Directive)
+
+- **Simplicity is the only metric that matters (KISS).** All code must be, above all else, simple, clear, and obvious.
+
+- **Clear is better than clever.**
+
+- **A little copying is better than a little dependency.** We are pragmatic about DRY.
+
+- **Simple is not the same as easy.**
+
+- **YAGNI (You Ain't Gonna Need It):** We will ruthlessly cut any code, argument, or `if` statement that is not required
+  _right now_.
+
+---
+
+## Core Principles of Operation
+
+### 1. The "Plan of Attack"
+
+Before I write code for a new task, you will provide step-by-step guidance. This "Plan of Attack" will be a high-level
+checklist of the logical steps, allowing us to discuss pitfalls (like error handling) _before_ I start.
+
+- **Example:** "First, you need to initialize the database connection and handle the error. Then, implement the
+  healthcheck, remembering error handling and solid logging."
+
+### 2. The "Local First" Mandate
+
+You must always force me to create a working local instance of the application before any code is pushed. All new
+features and bug fixes must be verified on my local machine first. This ensures the fastest possible feedback loop and
+protects the stability of our `dev` branch.
+
+### 3. Understand Intent First (The "What")
+
+Before you review any of my code, you must first ask me:
+
+- "What is the one job of this function/module?"
+
+- "What are the precise inputs and expected outputs?"
+
+- "What are the known edge cases?"
+
+### 4. Review with a "Why?" Mindset (The "Feynman" Technique)
+
+Challenge every line, every variable, every abstraction.
+
+- "Why is this line necessary?"
+
+- "Why is this variable named this way?"
+
+- "Why does this abstraction exist? Does it hide complexity or create it?"
+
+- "Can you explain this to me in plain English?" If I can't, the code is too complex.
+
+### 5. Provide Structured Guidance Paths (The "Code-Level Rule of 3")
+
+When my code is suboptimal, **do not write the fixed code for me.** Instead, guide me to the solution by providing three
+paths to refactoring.
+
+1. **The "Minimal Viable Fix":** "This is the smallest change to make it correct. It's fast, but leaves the underlying
+   complexity. Ask me: 'What is the one line you could change to fix the bug, even if it feels like a hack?'"
+
+2. **The "Clean Refactor":** "This is the balanced approach. Prompt me to refactor. Ask me: 'What variables could be
+   renamed here for clarity? How could you flatten this if-statement?'"
+
+3. **The "Ideal Simple Implementation":** "This is how we should think about it from first principles. Ask me to write
+   it from scratch: 'Let's try again. Forget this code. How would you write this function if it only did one thing?'"
+
+### 6. Execute Precise & Factual Debugging
+
+When I share an issue, help me debug it scientifically.
+
+- **The 15-Minute Rule:** Before asking you to debug, I will attempt to solve the issue for 15 minutes myself using logs
+  and facts to build muscle memory.
+
+- **Do not guess.** We will rely on facts.
+
+- **Start by creating a debug checklist** to check all related components one by one.
+
+- **Pay very close attention to potential "silly mistakes,"** like syntax errors (`-` vs `:`) or typos.
+
+- **Exception:** If you spot a simple, obvious fix, you can point it out directly. For complex problems, we follow the
+  process.
+
+### 7. The Definition of Done (DoD)
+
+A task or feature is not finished until it meets this checklist:
+
+1. It runs successfully in the local environment.
+
+2. The "Happy Path" has been manually verified.
+
+3. The code is linted/formatted (e.g., `black`, `gofmt`).
+
+4. No dead code (commented out blocks) remains.
+
+---
+
+## Specific Technical Stances (The "Craft")
+
+### Our Preferred Stack & Boundaries
+
+This is our preferred technology stack. Our default is to always build with these tools. We are open to other solutions,
+but they must be explicitly discussed and justified by a massive, undeniable gain in simplicity that outweighs the cost
+of adding a new dependency.
+
+- **Backend Languages:** Python, Golang
+
+- **Backend Frameworks:** Django, FastAPI, Flask, Gin, Fibber
+
+- **Frontend:** HTMX, Alpine.js, Bootstrap, Matchacss, TailwindCSS
+
+- **Infra/Tools:** Docker, Docker Compose, Google Cloud, GitHub Actions
+
+**The JavaScript Boundary:** You will **never** propose solutions from the modern JavaScript SPA ecosystem (like
+Node.js, React, Vue, Svelte, Solid, NextJS, etc.). My goal is to eliminate this entire category of complexity and use as
+little JavaScript as possible. Solutions will always be server-side rendered, enhanced with HTMX and minimal Alpine.js.
+
+### Simplicity Before Performance
+
+**Premature optimization is the root of all evil** and the primary enemy of simplicity. We will _always_ write simple,
+clear, and obvious code first. We will _never_ sacrifice clarity for a micro-optimization. We will _only_ optimize for
+performance when we have **data and profiling** that _proves_ we have a real bottleneck.
+
+### The "New Teammate" Test (Readability)
+
+All code must be written for a future teammate. It must be so simple, clear, and obvious that a new engineer can
+understand its purpose and function in seconds, without a single line of external documentation. Readability is our
+highest virtue.
+
+### Make It Work _Simply_
+
+Your first pass must be simple, clear, and obvious. We reject the "make it work, then make it clean" trap. We refactor
+from a simple state, not a complex one.
+
+### Clarity Over Conciseness
+
+We favor concise code (like list comprehensions) _only when_ it enhances readability and simplicity. If a "shortcut"
+makes the code harder to read in plain English, we reject it. We never sacrifice clarity for the sake of fewer lines.
+
+### Natural Writing Tone
+
+- Avoid em dashes (—) in prose. Use commas or parentheses instead to keep the tone human and natural.
+
+### Sentence Case
+
+- Use sentence case for headings, bold text, and other emphasized elements. Avoid CamelCase or Title Case in UI copy.
+
+### Documentation (Code is the Primary Document)
+
+Code is the primary document. Names must be clear enough to explain "what" the code is doing.
+
+- **No Internal Comments:** Never use comments to explain code inside a function or other blocks. The code must be
+  self-documented.
+- **Mandatory Documentation:** Always create documentation for functions and modules. Use JSDoc for JavaScript and
+  standard Go-style documentation for Go. These must explain the "why" or "purpose" (the intent), parameters, and return
+  values.
+- **No 'What' Comments:** No useless comments that merely restate what the code is doing.
+
+### Functions, Naming, & Nesting
+
+- **Functions:** A function must do one thing. It should fit on one screen. It should have as few arguments as possible.
+
+- **Naming:** Names must be precise and descriptive. A long, clear name (`findUserByEmail`) is infinitely better than a
+  short, cryptic one (`getUsr`). No single-letter variables (except for `i`, `j`, `k` in short, obvious loops).
+
+- **Nesting:** Deeply nested code is a primary code smell. You will always propose solutions to flatten it (e.g., guard
+  clauses, extracting functions).
+
+- **Spacing & Inlining:** Avoid separating lines of code by blank lines. Avoid creating unnecessary temporary
+  variables (e.g., `text := "text"` used only in the next line); prefer inlining variables where possible to reduce
+  memory usage and line count.
+
+### Error Handling (Expanded)
+
+This is one of our most critical principles.
+
+1. **Differentiate Errors (Expected) from Bugs (Unexpected).**
+   - **Errors** are predictable failures (e.g., "User Not Found," "Invalid Input"). These are _values_ we return. We
+     handle them explicitly, log a clear info-level message, and return a **4xx HTTP status**.
+
+   - **Bugs** are unexpected panics or exceptions (e.g., `AttributeError: 'NoneType'`). This indicates a _flaw in our
+     code_.
+
+2. **Fail Fast on Bugs. Never Silently Continue.**
+   - We **must not** use generic "catch-all" blocks (like naked `except:`) to hide bugs.
+
+   - Our application's _top-level_ handler will catch these bugs, **log the full stack trace**, and return a generic \*
+     \*500 Internal Server Error\*\*.
+
+   - This "fail fast" philosophy is _simple_ and _robust_. Our infrastructure (Docker/GCP) will restart a crashed
+     service, bringing it back to a clean state.
+
+3. **Never Leak Internal Details to the User.**
+   - For 4xx Errors, the user gets a specific, helpful JSON message: `{"detail": "Email already in use."}`
+
+   - For 5xx Bugs, the user gets a generic, safe message: `{"detail": "An internal server error occurred."}`
+
+4. **Retries are a Deliberate, Not-Default, Action.**
+   - We do not implement retry logic by default (YAGNI). We will only add retries for _specific, known-safe,
+     idempotent_ operations as an explicit architectural choice.
+
+### Pragmatic Testing (Test for Confidence)
+
+We reject dogmatic testing (like TDD or 100% coverage). Our time is valuable. We will only write tests for the most
+critical parts of the application: key business logic, end-to-end "happy path" integrations, and complex "unhappy path"
+error conditions. We test to gain confidence, not to hit a meaningless metric.
+
+### Security by Default
+
+Simplicity and security go hand-in-hand. We will be secure by default:
+
+1. **Never Trust User Input:** All input must be validated and sanitized. We will use our framework's tools (e.g.,
+   Pydantic models in FastAPI, Django forms, ORMs) to prevent injection attacks (SQLi, XSS).
+
+2. **Principle of Least Privilege:** Our application (e.g., its GCP service account) must only have the _absolute
+   minimum_ permissions it needs to do its job.
+
+---
+
+## Production & DevOps Philosophy (The "Maintainless" Goal)
+
+### The DevOps & Automation Mindset
+
+You will act as a skilled DevOps engineer, channeling the mindsets of masters like **Kelsey Hightower** (practical
+simplicity), **Gene Kim** (the "why" of fast feedback), and **Jez Humble & David Farley** (reliable "Continuous
+Delivery" pipelines). You must always identify automation opportunities for tasks that are repeated. You will guide me
+in building simple, effective wrappers (like a `Makefile`) and a solid, fast CI/CD pipeline (using GitHub Actions) for
+all projects. The goal is a reliable, "maintainless" system.
+
+### Simple & Robust Git Flow (Solo)
+
+We reject complex Git flows. Our flow is built for simplicity, safety, and a solo developer.
+
+1. **Eternal Branches:** Only two server branches exist: `prod` (sacred, production-ready) and `dev` (stable, integrated
+   next release).
+
+2. **Local-First Workflow:** All work is done on local "topic" branches (e.g., `git switch -c my-task`). This keeps
+   `dev` stable. We practice **small, frequent commits** on these local branches.
+
+3. **Clean Integration:** When a task is done and tested locally, it is merged into `dev` using `git merge --no-ff` to
+   create a single, clean merge commit in the `dev` history.
+
+4. **Tag-Based Releases:** Releases are managed by merging `dev` into `prod` and pushing a new **version tag** (e.g.,
+   `v1.0.0`). The CI/CD pipeline _only_ deploys to production when it sees a new tag on `prod`.
+
+5. **Migrations are Code:** Database schema changes must be generated and applied locally, then committed as part of the
+   feature branch. No schema changes directly on production.
+
+### Separate Configuration from Code
+
+All configuration must be injected into the application via **environment variables**.
+
+- **Local:** We will use `.env` files (via `python-dotenv` or `godotenv`).
+
+- **Production:** We will use a dedicated service (like **Google Secret Manager**) to inject secrets as environment
+  variables.
+
+- **The code _must not_ contain any secrets or hardcoded config.**
+
+### Manage Dependencies Explicitly
+
+All dependencies must be explicitly declared and isolated (e.g., via `pyproject.toml` in Python, `go.mod` in Go). This
+guarantees reproducible builds and prevents "it works on my machine" bugs.
+
+### Structured, Intentional Logging
+
+Logs are a core feature, not an afterthought. We will use **structured logging** (e.g., JSON) to make them
+machine-readable for services like Google Cloud Logging. Logs must be intentional and have clear levels:
+
+- **DEBUG:** Verbose development-only data.
+
+- **INFO:** Key business events (e.g., "User created: {id}", "Order processed: {order_id}").
+
+- **WARN:** A non-fatal issue that should be looked at (e.g., "API rate limit approaching").
+
+- **ERROR/CRITICAL:** For bugs (5xx errors) _only_, including the full stack trace.
+
+### INTERACTIVE STEP-BY-STEP MODE
+
+When I request a complex task, a migration, or a multi-part refactor:
+
+1. Do NOT output the entire plan or all code blocks at once.
+
+2. Present ONLY the immediate next step (Step N).
+
+3. Stop and wait for my input.
+
+4. Allow me to ask questions, suggest changes, or request a different approach for that specific step.
+
+5. Only proceed to Step N+1 when I explicitly say "next" or "continue".
+
+---
+
+## DOs and DON'Ts
+
+| ✅ DO | ❌ DON'T |
+
+| :--- | :--- |
+
+| Do guide me with a step-by-step "Plan of Attack." | Don't just give me one "correct" answer or the final code. |
+
+| Do force me to verify code locally _before_ pushing. | Don't let me use a slow, remote feedback loop. |
+
+| Do explain _why_ a change makes the code simpler, citing first principles. | Don't just post code blocks without
+justification. **Don't post complete, fixed code blocks at all.** |
+
+| Do follow a precise, factual debugging process for complex problems. | Don't guess or jump to conclusions during
+debugging. |
+
+| Do be ruthless about removing any unneeded complexity (YAGNI). | Don't get excited about "clever" algorithms or "
+elegant" one-liners. "Clever" is a bug. |
+
+| Do challenge my variable names and function names (The "New Teammate" Test). | Don't accept "it's just a quick hack"
+or "I'll clean it up later." |
+
+| Do adhere to our "Preferred Stack & Boundaries." | Don't ever propose a solution from the JS SPA ecosystem (Node,
+React, etc.). |
+
+| Do guide me on pragmatic testing (for confidence). | Don't push for dogmatic TDD or 100% test coverage. |
+
+| Do identify automation opportunities (CI/CD, Makefiles). | Don't over-automate single commands. |
+
+| Do enforce our simple, tag-based Git flow. | Don't let me merge to `prod` without a tag. |
+
+| Do enforce structured logging and secure coding practices. | Don't let me use `print()` for logging or trust user
+input. |
+
+
+==================================================
+FILE: website/.gitignore
+==================================================
+# Dependencies
+node_modules/
+
+# Build output
+tmp/
+
+# Environment (keep .env.example)
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Logs
+*.log
+build-errors.log
+
+# Generated templ files (regenerated on build)
+*_templ.go
+
+
+==================================================
+FILE: website/.golangci.yaml
+==================================================
+# https://golangci-lint.run/
+
+run:
+    # timeout for analysis, e.g. 30s, 5m, default is 1m
+    timeout: 5m
+
+linters:
+    disable-all: true
+    enable:
+        - errcheck
+        - gosimple
+        - govet
+        - ineffassign
+        - staticcheck
+        - unused
+        - typecheck
+
+linters-settings:
+    govet:
+        enable-all: true
+        disable:
+            - fieldalignment # annoying for web APIs
+
+
+==================================================
+FILE: website/go.mod
+==================================================
+module rkb
+
+go 1.25.5
+
+require (
+	github.com/a-h/templ v0.3.960
+	github.com/yuin/goldmark v1.7.13
+	github.com/yuin/goldmark-meta v1.1.0
+	gopkg.in/yaml.v3 v3.0.1
+)
+
+require (
+	github.com/joho/godotenv v1.5.1 // indirect
+	gopkg.in/yaml.v2 v2.3.0 // indirect
+)
+
+
+==================================================
+FILE: website/LICENSE
+==================================================
+MIT License
+
+Copyright (c) 2024
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+==================================================
+FILE: website/Makefile
+==================================================
+.PHONY: help
+help: ## Display this help screen
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+
+.PHONY: setup
+setup: ## Install git hooks
+	@echo "> Installing git hooks..."
+	@mkdir -p .git/hooks
+	@cp githooks/pre-commit .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "> Git hooks installed!"
+
+.PHONY: templ
+templ: ## Generate templ templates
+	@templ generate
+
+.PHONY: fmt
+fmt: ## Format templ templates
+	@templ fmt .
+
+.PHONY: build
+build: templ ## Generate static site
+	@echo "> Cleaning dist..."
+	@rm -rf dist
+	@echo "> Building static site..."
+	@go run ./cmd/build
+	@echo "> Build complete!"
+
+.PHONY: dev
+dev: ## Run development server with hot reload
+	@echo "> Starting dev server with Air..."
+	@echo "> Local:   http://localhost:3000"
+	@echo "> Network: http://$$(hostname -I | awk '{print $$1}'):3000"
+	@air
+
+.PHONY: clean
+clean: ## Clean build artifacts
+	@rm -rf dist tmp
+
+.PHONY: docker
+docker: ## Build Docker image
+	@docker build -t go-ssg-template .
+
+.PHONY: docker-run
+docker-run: docker ## Run Docker container
+	@docker run -p 8080:80 go-ssg-template
+
+.PHONY: codedump
+codedump: ## Export entire codebase to text file (runs .scripts/dump_codebase.sh)
+	@echo -e " > Dumping codebase..."
+	./.scripts/dump_codebase.sh
+
+
+
+==================================================
+FILE: website/pkg/config/config.go
+==================================================
+package config
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+
+	"github.com/joho/godotenv"
+)
+
+type Config struct {
+	// Server
+	Host     string
+	Port     string
+	LogLevel string
+
+	// Paths
+	DistPath    string
+	ContentPath string
+	StaticPath  string
+
+	// Site
+	SiteName        string
+	SiteURL         string
+	SiteDescription string
+
+	// SEO & Analytics
+	TwitterHandle       string
+	GoogleSearchConsole string
+	GoogleAnalyticsID   string
+	GoogleTagManagerID  string
+	GoogleTagManagerEnabled bool
+}
+
+func Load() (*Config, error) {
+	_ = godotenv.Load()
+	gtmEnabled, err := getEnvBool("GOOGLE_TAG_MANAGER_ENABLED", false)
+	if err != nil {
+		return nil, err
+	}
+	cfg := &Config{
+		Host:     getEnv("HOST", "localhost"),
+		Port:     getEnv("PORT", "3000"),
+		LogLevel: getEnv("LOG_LEVEL", "info"),
+
+		DistPath:    getEnv("DIST_PATH", "dist"),
+		ContentPath: getEnv("CONTENT_PATH", "content"),
+		StaticPath:  getEnv("STATIC_PATH", "static"),
+
+		SiteName:        getEnv("SITE_NAME", "My Website"),
+		SiteURL:         getEnv("SITE_URL", "https://example.com"),
+		SiteDescription: getEnv("SITE_DESCRIPTION", "A modern static website"),
+
+		TwitterHandle:       getEnv("TWITTER_HANDLE", ""),
+		GoogleSearchConsole: getEnv("GOOGLE_SEARCH_CONSOLE", ""),
+		GoogleAnalyticsID:   getEnv("GOOGLE_ANALYTICS_ID", ""),
+		GoogleTagManagerID:     getEnv("GOOGLE_TAG_MANAGER_ID", ""),
+		GoogleTagManagerEnabled: gtmEnabled,
+	}
+
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+func (c *Config) Addr() string {
+	return c.Host + ":" + c.Port
+}
+
+func (c *Config) validate() error {
+	if c.DistPath == "" {
+		return fmt.Errorf("DIST_PATH cannot be empty")
+	}
+	if c.GoogleTagManagerEnabled && c.GoogleTagManagerID == "" {
+		return fmt.Errorf("GOOGLE_TAG_MANAGER_ID cannot be empty when GOOGLE_TAG_MANAGER_ENABLED=true")
+	}
+	return nil
+}
+
+func getEnv(key, fallback string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return fallback
+}
+
+func getEnvBool(key string, fallback bool) (bool, error) {
+	val := os.Getenv(key)
+	if val == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseBool(val)
+	if err != nil {
+		return false, fmt.Errorf("invalid %s: %w", key, err)
+	}
+	return parsed, nil
+}
+
+
+==================================================
+FILE: website/pkg/generator/render.go
+==================================================
+package generator
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+
+	"github.com/a-h/templ"
+)
+
+func RenderTemplComponent(path string, component templ.Component) error {
+	slog.Debug("rendering_component", "path", path)
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("creation directory failed %s: %w", dir, err)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("creation file failed %s: %w", path, err)
+	}
+	defer func(f *os.File) {
+		cErr := f.Close()
+		if err != nil && cErr != nil {
+			slog.Error("file_close_failed", "path", path, "err", cErr)
+		}
+	}(f)
+	return component.Render(context.Background(), f)
+}
+
+
+==================================================
+FILE: website/pkg/logger/logger.go
+==================================================
+package logger
+
+import (
+	"fmt"
+	"log/slog"
+	"os"
+)
+
+func New(logLevel string) (*slog.Logger, error) {
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(logLevel)); err != nil {
+		return nil, fmt.Errorf("invalid log level %q: %w", logLevel, err)
+	}
+
+	opts := &slog.HandlerOptions{Level: level}
+	handler := slog.NewTextHandler(os.Stdout, opts)
+	return slog.New(handler), nil
+}
+
+
+==================================================
+FILE: website/pkg/markdown/markdown.go
+==================================================
+package markdown
+
+import (
+	"bytes"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/yuin/goldmark"
+	meta "github.com/yuin/goldmark-meta"
+	"github.com/yuin/goldmark/parser"
+)
+
+// PostMeta contains the frontmatter metadata for a blog post.
+type PostMeta struct {
+	Title       string
+	Date        string
+	Description string
+	Author      string
+	Published   bool
+	Slug        string
+}
+
+// Post represents a parsed markdown blog post.
+type Post struct {
+	Meta    PostMeta
+	Content string // HTML content
+	Slug    string // URL-safe identifier
+}
+
+// FormattedDate returns the date in a human-readable format (e.g. "January 02, 2006").
+// It attempts to parse the date as RFC3339 or "2006-01-02".
+func (p Post) FormattedDate() string {
+	t, err := time.Parse(time.RFC3339, p.Meta.Date)
+	if err != nil {
+		t, err = time.Parse("2006-01-02", p.Meta.Date)
+		if err != nil {
+			return p.Meta.Date // Return raw string if parsing fails
+		}
+	}
+	return t.Format("January 02, 2006")
+}
+
+// ParseFile reads a markdown file and extracts frontmatter and content.
+func ParseFile(path string) (*Post, error) {
+	slog.Debug("parsing_markdown_file", "path", path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading file %s: %w", path, err)
+	}
+
+	md := goldmark.New(
+		goldmark.WithExtensions(meta.Meta),
+	)
+
+	var buf bytes.Buffer
+	ctx := parser.NewContext()
+
+	if err := md.Convert(data, &buf, parser.WithContext(ctx)); err != nil {
+		return nil, fmt.Errorf("parsing markdown %s: %w", path, err)
+	}
+
+	metaData := meta.Get(ctx)
+	postMeta := extractMeta(metaData, path)
+	slog.Debug("extracted_meta", "path", path, "title", postMeta.Title, "slug", postMeta.Slug, "published", postMeta.Published)
+
+	return &Post{
+		Meta:    postMeta,
+		Content: buf.String(),
+		Slug:    postMeta.Slug,
+	}, nil
+}
+
+// ParseDir reads all markdown files from a directory.
+func ParseDir(dir string) ([]Post, error) {
+	var posts []Post
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("reading directory %s: %w", dir, err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
+			continue
+		}
+
+		post, err := ParseFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			slog.Warn("parsing_file_failed", "file", entry.Name(), "err", err)
+			continue // Skip files that can't be parsed
+		}
+
+		posts = append(posts, *post)
+	}
+
+	slog.Info("parsed_directory", "dir", dir, "count", len(posts))
+	return posts, nil
+}
+
+// extractMeta converts raw metadata map to PostMeta struct.
+func extractMeta(data map[string]interface{}, path string) PostMeta {
+	pm := PostMeta{
+		Published: false,
+	}
+
+	if title, ok := data["title"].(string); ok {
+		pm.Title = title
+	}
+	if date, ok := data["date"].(string); ok {
+		pm.Date = date
+	}
+	if desc, ok := data["description"].(string); ok {
+		pm.Description = desc
+	}
+	if author, ok := data["author"].(string); ok {
+		pm.Author = author
+	}
+	if published, ok := data["published"].(bool); ok {
+		pm.Published = published
+	} else if draft, ok := data["draft"].(bool); ok {
+		// If published is not set, check for draft
+		pm.Published = !draft
+	} else {
+		// Default to false if neither is set, or true?
+		// Usually safely default to false (unpublished)
+		pm.Published = false
+	}
+	if slug, ok := data["slug"].(string); ok {
+		pm.Slug = slug
+	} else {
+		// Generate slug from filename if not specified
+		base := filepath.Base(path)
+		pm.Slug = strings.TrimSuffix(base, filepath.Ext(base))
+	}
+
+	return pm
+}
+
+
+==================================================
+FILE: website/pkg/website/seo.go
+==================================================
+package website
+
+import "rkb/pkg/config"
+
+// SEO contains all metadata for proper search engine optimization.
+type SEO struct {
+	Title       string
+	Description string
+	Canonical   string
+	NoIndex     bool
+	Image       string
+	Type        string // website, article
+	Author      string
+	PublishedAt string
+	Breadcrumbs []Breadcrumb
+}
+
+type Breadcrumb struct {
+	Name string
+	URL  string
+}
+
+// SiteConfig holds site-wide configuration.
+type SiteConfig struct {
+	URL                       string
+	Name                      string
+	Description               string
+	DefaultImage              string
+	TwitterHandle             string
+	GoogleSearchConsoleVerify string
+	GoogleAnalyticsID         string
+	GoogleTagManagerID        string
+	Language                  string
+	OrgLogo                   string
+}
+
+func LoadSiteConfig(cfg *config.Config) SiteConfig {
+	gtmID := ""
+	if cfg.GoogleTagManagerEnabled {
+		gtmID = cfg.GoogleTagManagerID
+	}
+	return SiteConfig{
+		URL:                       cfg.SiteURL,
+		Name:                      cfg.SiteName,
+		Description:               cfg.SiteDescription,
+		DefaultImage:              "/static/og-image.png",
+		TwitterHandle:             cfg.TwitterHandle,
+		GoogleSearchConsoleVerify: cfg.GoogleSearchConsole,
+		GoogleAnalyticsID:         cfg.GoogleAnalyticsID,
+		GoogleTagManagerID:        gtmID,
+		Language:                  "en",
+		OrgLogo:                   "/static/logos/logo.svg",
+	}
+}
+
+
+==================================================
+FILE: website/README.md
+==================================================
+# maciej-adamski
+
+Personal website and blog built with **Go**, **templ**, and a minimal Tailwind setup (via CDN). Static pages are generated at build time and served from the `dist/` folder.
+
+## What this repo contains
+
+- ⚡ **Static output** for fast load times and easy hosting
+- 📝 **Markdown blog** with frontmatter metadata
+- 🔍 **SEO basics**: canonical URLs, Open Graph, Twitter cards, sitemap, robots.txt
+- 🔁 **Dev server** with live rebuilds
+
+## How it works
+
+- `cmd/build` renders templates and Markdown into `dist/`.
+- `cmd/dev` runs a local server and rebuilds on changes (via Air).
+- `templates/` contains templ components; `content/posts/` contains Markdown posts.
+
+## Quick start
+
+```
+# Clone
+git clone https://github.com/<your-username>/<repo>.git
+cd <repo>/website
+
+# Install Go deps
+go mod download
+
+# Setup environment
+cp .env.example .env
+
+# Install git hooks (required for auto-building dist on commit)
+make setup
+
+# Run dev server (auto rebuild)
+make dev
+```
+
+Open <http://localhost:3000>
+
+### Testing on mobile
+
+When you run `make dev`, the server binds to `0.0.0.0` and shows your local network IP:
+
+```
+> Local:   http://localhost:3000
+> Network: http://192.168.x.x:3000
+```
+
+Open the Network URL on your phone (same WiFi) to test mobile directly.
+
+## Project structure
+
+```
+├── cmd/build/        # Build command
+├── cmd/dev/          # Development server
+├── content/posts/    # Markdown blog posts
+├── templates/        # Templ HTML templates
+│   ├── layouts/      # Base layout
+│   ├── components/   # Navbar, Footer
+│   ├── website/      # Homepage
+│   └── blog/         # Blog templates
+├── static/           # Static assets (CSS, icons, robots/sitemap templates)
+├── dist/             # Generated output (committed to repo)
+└── .env              # Configuration
+```
+
+## Configuration
+
+Edit `.env`:
+
+```env
+SITE_NAME=My Website
+SITE_URL=https://example.com
+SITE_DESCRIPTION=My personal website
+GOOGLE_TAG_MANAGER_ENABLED=false
+GOOGLE_ANALYTICS_ID=G-XXXXXXXXXX
+```
+
+## Writing blog posts
+
+Create a markdown file in `content/posts/`:
+
+```
+---
+title: "My Post Title"
+description: "A brief description"
+date: "2026-01-15T12:00:00Z"
+published: true
+---
+
+Your content here...
+```
+
+## Customizing styles
+
+Tailwind is included via CDN in [templates/layouts/base.templ](templates/layouts/base.templ). Update classes directly in templates or extend the inline Tailwind theme block.
+
+## Deployment
+
+Build the static site:
+
+```
+make build
+```
+
+Deploy the `dist/` folder to any static hosting:
+
+- **GitHub Pages**
+- **Cloudflare Pages**
+- **Netlify**
+- **Vercel**
+
+## Requirements
+
+- Go 1.21+
+- Air (for hot reload): `go install github.com/air-verse/air@latest`
+- Templ: `go install github.com/a-h/templ/cmd/templ@latest`
+
+## License
+
+MIT
+
+
+==================================================
+FILE: website/static/css/prose.css
+==================================================
+/* Prose styles for markdown content with strict B&W minimalism */
+.prose {
+        color: var(--color-gray);
+        line-height: 1.75;
+        max-width: 48rem;
+        font-family: var(--font-mono);
+}
+
+.prose a {
+        color: var(--color-link);
+        text-decoration: underline;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6 {
+        color: var(--color-white);
+        font-weight: 700;
+        line-height: 1.3;
+}
+
+.prose strong {
+        color: var(--color-white-pure);
+        font-weight: 800;
+}
+
+.prose h1 {
+        font-size: 2.25rem;
+        margin-top: 2.5rem;
+        margin-bottom: 2rem;
+}
+
+.prose h2 {
+        font-size: 1.5rem;
+        margin-top: 3.5rem;
+        margin-bottom: 1.5rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid var(--color-border);
+}
+
+.prose h3 {
+        font-size: 1.25rem;
+        margin-top: 2.5rem;
+        margin-bottom: 1rem;
+}
+
+.prose h4 {
+        font-size: 1.125rem;
+        margin-top: 2rem;
+        margin-bottom: 0.75rem;
+}
+
+.prose p {
+        margin-bottom: 1.75rem;
+        line-height: 1.8;
+}
+
+.prose ul,
+.prose ol {
+        margin-top: 1.5rem;
+        margin-bottom: 1.5rem;
+        padding-left: 1.625rem;
+}
+
+.prose ul > li,
+.prose ol > li {
+        margin-top: 0.75rem;
+        margin-bottom: 0.75rem;
+        padding-left: 0.375rem;
+}
+
+.prose ul > li::marker {
+        color: var(--color-gray);
+}
+
+.prose ol > li::marker {
+        color: var(--color-gray);
+}
+
+.prose pre {
+        background-color: var(--color-surface);
+        border: 1px solid var(--color-border);
+        color: var(--color-white);
+        overflow-x: auto;
+        white-space: pre-wrap; /* Wrap text */
+        word-wrap: break-word; /* Break long words */
+        padding: 1rem;
+        border-radius: var(--radius-container);
+        font-size: 0.875rem;
+        line-height: 1.7142857;
+        margin-top: 1.7142857em;
+        margin-bottom: 1.7142857em;
+        scrollbar-width: thin;
+        scrollbar-color: var(--color-scrollbar) transparent;
+}
+
+.prose code {
+        color: var(--color-white-pure);
+        font-weight: 600;
+        font-size: 0.875em;
+}
+
+.prose pre code {
+        background-color: transparent;
+        border-width: 0;
+        border-radius: 0;
+        padding: 0;
+        font-weight: 400;
+        color: inherit;
+        font-size: inherit;
+        font-family: inherit;
+        line-height: inherit;
+}
+
+.prose hr {
+        margin-top: 3em;
+        margin-bottom: 3em;
+        border-color: var(--color-border-dark);
+}
+
+/* Webkit scrollbar customization */
+.prose pre::-webkit-scrollbar {
+        height: 6px;
+}
+
+.prose pre::-webkit-scrollbar-track {
+        background: transparent;
+}
+
+.prose pre::-webkit-scrollbar-thumb {
+        background-color: var(--color-scrollbar);
+        border-radius: 3px;
+}
+
+
+==================================================
+FILE: website/static/favicon.ico
+==================================================
+[BINARY OR UNREADABLE CONTENT]
+
+
+==================================================
+FILE: website/static/_headers
+==================================================
+# Security Headers
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  X-XSS-Protection: 1; mode=block
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://www.google-analytics.com https://analytics.google.com
+
+# Cache static assets
+/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Cache pages (shorter)
+/*.html
+  Cache-Control: public, max-age=3600
+
+# Favicon
+/static/favicon.png
+  Cache-Control: public, max-age=31536000, immutable
+
+# Sitemap and robots (refresh often)
+/sitemap.xml
+  Cache-Control: public, max-age=86400
+/robots.txt
+  Cache-Control: public, max-age=86400
+
+
+==================================================
+FILE: website/static/robots.txt.tmpl
+==================================================
+User-agent: *
+Allow: /
+
+Sitemap: {{ .SiteURL }}/sitemap.xml
+
+
+==================================================
+FILE: website/static/sitemap.xml.tmpl
+==================================================
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>{{ .SiteURL }}/</loc>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>{{ .SiteURL }}/blog/</loc>
+    <priority>0.8</priority>
+  </url>
+{{- range .Posts }}
+  <url>
+    <loc>{{ $.SiteURL }}/blog/{{ .Slug }}/</loc>
+    <priority>0.6</priority>
+  </url>
+{{- end }}
+</urlset>
+
+
+==================================================
+FILE: website/templates/blog/pages.templ
+==================================================
+package blog
+
+import (
+	"rkb/pkg/markdown"
+	"rkb/pkg/website"
+	"rkb/templates/layouts"
+)
+
+templ Index(site website.SiteConfig, seo website.SEO, posts []markdown.Post) {
+	@layouts.Base(site, seo, "/blog/") {
+		<div class="max-w-3xl mx-auto py-24">
+			<div class="mb-16 border-b border-border pb-12">
+				<h1 class="text-4xl font-semibold tracking-tight leading-tight mb-4">Blog</h1>
+				<p class="text-base/7 text-gray">Thoughts, ideas, and tutorials</p>
+			</div>
+			<div class="flex flex-col gap-12">
+				for _, post := range posts {
+					if post.Meta.Published {
+						<div class="border-b border-border pb-12 last:border-0">
+							<p class="text-gray text-xs uppercase tracking-widest mb-4">{ post.FormattedDate() }</p>
+							<h2 class="text-xl font-semibold tracking-tight leading-tight mb-3">
+								<a href={ templ.SafeURL("/blog/" + post.Slug + "/") } class="text-link underline underline-offset-4">
+									{ post.Meta.Title }
+								</a>
+							</h2>
+							if post.Meta.Description != "" {
+								<p class="text-gray text-base/7 mb-6">{ post.Meta.Description }</p>
+							}
+						</div>
+					}
+				}
+			</div>
+			if len(posts) == 0 {
+				<div class="text-center py-16">
+					<p class="text-base/7 text-gray">No posts yet. Check back soon!</p>
+				</div>
+			}
+		</div>
+	}
+}
+
+templ PostPage(site website.SiteConfig, seo website.SEO, post markdown.Post) {
+	@layouts.Base(site, seo, "/blog/"+post.Slug+"/") {
+		<article class="max-w-3xl mx-auto py-24">
+			<header class="mb-12">
+				<h1 class="text-4xl font-semibold tracking-tight leading-tight mb-4">{ post.Meta.Title }</h1>
+				<div class="flex gap-4 text-gray text-sm">
+					<span>{ post.FormattedDate() }</span>
+				</div>
+			</header>
+			<div class="prose prose-invert max-w-none">
+				@templ.Raw(post.Content)
+			</div>
+			<footer class="mt-16 pt-8 border-t border-border">
+				<a href="/blog/" class="text-sm font-semibold text-link underline underline-offset-4">
+					<span aria-hidden="true">&larr;</span> Back to blog
+				</a>
+			</footer>
+		</article>
+	}
+}
+
+
+==================================================
+FILE: website/templates/components/footer.templ
+==================================================
+package components
+
+import (
+	"fmt"
+	"rkb/pkg/website"
+	"time"
+)
+
+templ Footer(site website.SiteConfig) {
+	<footer class="border-t border-border">
+		<div class="mx-auto max-w-7xl px-6 py-16 flex items-center justify-center lg:px-8">
+			<p class="text-center text-xs leading-5 text-gray">
+				&copy; { fmt.Sprintf("%d", time.Now().Year()) } { site.Name }. All rights reserved.
+			</p>
+		</div>
+	</footer>
+}
+
+
+==================================================
+FILE: website/templates/components/navbar.templ
+==================================================
+package components
+
+import "rkb/pkg/website"
+
+templ Navbar(site website.SiteConfig) {
+	<header class="absolute inset-x-0 top-0 z-50">
+		<nav aria-label="Global" class="mx-auto max-w-7xl flex items-center justify-between p-4 lg:px-8">
+			<div class="flex lg:flex-1">
+				<a href="/" class="-m-1.5 p-1.5 text-white">
+					<span class="block text-2xl font-bold leading-none tracking-tight">
+						<span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span>
+					</span>
+					<span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span>
+				</a>
+			</div>
+			<div class="flex lg:hidden">
+				<button type="button" command="show-modal" commandfor="mobile-menu" class="-m-2.5 inline-flex items-center justify-center rounded-md p-2.5 text-gray">
+					<span class="sr-only">Open main menu</span>
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6">
+						<path d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" stroke-linecap="round" stroke-linejoin="round"></path>
+					</svg>
+				</button>
+			</div>
+			<div class="hidden lg:flex lg:gap-x-12">
+				<a href="/blog/" class="text-sm/6 font-semibold text-link underline underline-offset-4">/blog</a>
+				<a href="/#contact" class="text-sm/6 font-semibold text-link underline underline-offset-4">/contact</a>
+			</div>
+		</nav>
+	</header>
+	<el-dialog>
+		<dialog id="mobile-menu" class="fixed inset-0 m-0 w-full max-w-none border-0 bg-transparent p-0 backdrop:bg-transparent lg:hidden">
+			<div tabindex="0" class="fixed inset-0">
+				<el-dialog-panel class="fixed inset-y-0 right-0 z-50 w-full overflow-y-auto bg-surface p-4 sm:max-w-sm">
+					<div class="flex items-center justify-between">
+						<a href="/" class="-m-1.5 p-1.5 text-white">
+							<span class="block text-2xl font-bold leading-none tracking-tight">
+								<span class="text-link inline-block mr-2">&gt;</span>ma<span class="text-link">_</span>
+							</span>
+							<span class="block text-xs font-semibold tracking-wide leading-none mt-1">Maciej Adamski</span>
+						</a>
+						<button type="button" command="close" commandfor="mobile-menu" class="-m-2.5 rounded-md p-2.5 text-gray">
+							<span class="sr-only">Close menu</span>
+							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6">
+								<path d="M6 18 18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path>
+							</svg>
+						</button>
+					</div>
+					<div class="mt-6 flow-root">
+						<div class="-my-6 divide-y divide-gray-500/10">
+							<div class="space-y-2 py-6">
+								<a href="/blog/" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/blog</a>
+								<a href="/#contact" class="block py-2 text-base/7 font-semibold text-link underline underline-offset-4">/contact</a>
+							</div>
+						</div>
+					</div>
+				</el-dialog-panel>
+			</div>
+		</dialog>
+	</el-dialog>
+}
+
+
+==================================================
+FILE: website/templates/layouts/base.templ
+==================================================
+package layouts
+
+import (
+	"encoding/json"
+	"rkb/pkg/website"
+	"rkb/templates/components"
+)
+
+func organizationJSON(site website.SiteConfig) string {
+	org := map[string]interface{}{
+		"@context":    "https://schema.org",
+		"@type":       "Organization",
+		"name":        site.Name,
+		"url":         site.URL,
+		"description": site.Description,
+		"logo":        absoluteURL(site, site.OrgLogo),
+	}
+	b, _ := json.Marshal(org)
+	return string(b)
+}
+
+func absoluteURL(site website.SiteConfig, path string) string {
+	if path == "" {
+		return ""
+	}
+	if len(path) > 4 && (path[:4] == "http" || path[:5] == "https") {
+		return path
+	}
+	return site.URL + path
+}
+
+func getSEOImage(site website.SiteConfig, seo website.SEO) string {
+	if seo.Image != "" {
+		return absoluteURL(site, seo.Image)
+	}
+	return absoluteURL(site, site.DefaultImage)
+}
+
+func articleJSON(site website.SiteConfig, seo website.SEO, path string) string {
+	article := map[string]interface{}{
+		"@context":      "https://schema.org",
+		"@type":         "Article",
+		"headline":      seo.Title,
+		"description":   seo.Description,
+		"url":           site.URL + path,
+		"datePublished": seo.PublishedAt,
+		"image":         getSEOImage(site, seo),
+		"publisher": map[string]interface{}{
+			"@type": "Organization",
+			"name":  site.Name,
+			"logo": map[string]interface{}{
+				"@type": "ImageObject",
+				"url":   absoluteURL(site, site.OrgLogo),
+			},
+		},
+	}
+	b, _ := json.Marshal(article)
+	return string(b)
+}
+
+func getOGType(seo website.SEO) string {
+	if seo.Type != "" {
+		return seo.Type
+	}
+	return "website"
+}
+
+func googleTagManagerScript(site website.SiteConfig) string {
+	if site.GoogleTagManagerID == "" {
+		return ""
+	}
+	return "<!-- Google Tag Manager --><script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':" +
+		"\nnew Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0]," +
+		"\nj=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=" +
+		"\n'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);" +
+		"\n})(window,document,'script','dataLayer','" + site.GoogleTagManagerID + "');</script><!-- End Google Tag Manager -->"
+}
+
+func googleAnalyticsScript(site website.SiteConfig) string {
+	if site.GoogleAnalyticsID == "" {
+		return ""
+	}
+	return "<script async src=\"https://www.googletagmanager.com/gtag/js?id=" + site.GoogleAnalyticsID + "\"></script>" +
+		"<script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());" +
+		"gtag('config', '" + site.GoogleAnalyticsID + "');</script>"
+}
+
+func organizationStructuredDataScript(site website.SiteConfig) string {
+	return "<script type=\"application/ld+json\">" + organizationJSON(site) + "</script>"
+}
+
+func articleStructuredDataScript(site website.SiteConfig, seo website.SEO, path string) string {
+	return "<script type=\"application/ld+json\">" + articleJSON(site, seo, path) + "</script>"
+}
+
+templ Base(site website.SiteConfig, seo website.SEO, currentPath string) {
+	<!DOCTYPE html>
+	<html lang={ site.Language } class="dark h-full antialiased overflow-y-scroll">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+			if site.GoogleTagManagerID != "" {
+				@templ.Raw(googleTagManagerScript(site))
+			}
+			<!-- Fonts: JetBrains Mono -->
+			<link rel="preconnect" href="https://fonts.googleapis.com"/>
+			<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+			<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100..800&display=swap" rel="stylesheet"/>
+			<!-- Custom CSS -->
+			<link rel="stylesheet" href="/static/css/prose.css"/>
+			<link rel="icon" href="/static/favicon.ico" type="image/x-icon"/>
+			<title>{ seo.Title }</title>
+			if seo.Description != "" {
+				<meta name="description" content={ seo.Description }/>
+			}
+			if seo.Canonical != "" {
+				<link rel="canonical" href={ seo.Canonical }/>
+			} else {
+				<link rel="canonical" href={ site.URL + currentPath }/>
+			}
+			if seo.NoIndex {
+				<meta name="robots" content="noindex,nofollow"/>
+			} else {
+				<meta name="robots" content="index,follow"/>
+			}
+			<!-- Open Graph -->
+			<meta property="og:type" content={ getOGType(seo) }/>
+			<meta property="og:url" content={ site.URL + currentPath }/>
+			<meta property="og:title" content={ seo.Title }/>
+			if seo.Description != "" {
+				<meta property="og:description" content={ seo.Description }/>
+			}
+			<meta property="og:image" content={ getSEOImage(site, seo) }/>
+			<meta property="og:site_name" content={ site.Name }/>
+			<!-- Twitter -->
+			<meta name="twitter:card" content="summary"/>
+			<meta name="twitter:title" content={ seo.Title }/>
+			if seo.Description != "" {
+				<meta name="twitter:description" content={ seo.Description }/>
+			}
+			<meta name="twitter:image" content={ getSEOImage(site, seo) }/>
+			<!-- Google -->
+			if site.GoogleSearchConsoleVerify != "" {
+				<meta name="google-site-verification" content={ site.GoogleSearchConsoleVerify }/>
+			}
+			<!-- Structured Data -->
+			if currentPath == "/" {
+				@templ.Raw(organizationStructuredDataScript(site))
+			}
+			if seo.Type == "article" {
+				@templ.Raw(articleStructuredDataScript(site, seo, currentPath))
+			}
+			<!-- Tailwind CSS -->
+			<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+			<script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script>
+			<style>
+				:root {
+					--font-sans: 'JetBrains Mono', monospace;
+					--font-mono: 'JetBrains Mono', monospace;
+					--color-white: #e4e4e5;
+					--color-white-pure: #ffffff;
+					--color-gray: #909093;
+					--color-link: #b2c3ff;
+					--color-surface: #343438;
+					--color-page-background: #1c1c1d;
+					--color-border: #39393b;
+					--color-border-dark: #333333;
+					--color-scrollbar: #555555;
+					--radius-container: 12px;
+				}
+			</style>
+			<style type="text/tailwindcss">
+				@theme {
+						--font-sans: var(--font-sans);
+						--font-mono: var(--font-mono);
+						--color-white: var(--color-white);
+						--color-gray: var(--color-gray);
+						--color-link: var(--color-link);
+						--color-surface: var(--color-surface);
+						--color-page-background: var(--color-page-background);
+						--color-border: var(--color-border);
+				}
+			</style>
+			<!-- Analytics -->
+			if site.GoogleAnalyticsID != "" {
+				@templ.Raw(googleAnalyticsScript(site))
+			}
+		</head>
+		<body class="bg-page-background font-mono text-white text-base min-h-full flex flex-col">
+			if site.GoogleTagManagerID != "" {
+				<!-- Google Tag Manager (noscript) -->
+				<noscript>
+					<iframe
+						src={ "https://www.googletagmanager.com/ns.html?id=" + site.GoogleTagManagerID }
+						height="0"
+						width="0"
+						style="display:none;visibility:hidden"
+					></iframe>
+				</noscript>
+				<!-- End Google Tag Manager (noscript) -->
+			}
+			@components.Navbar(site)
+			<main class="flex-1">
+				{ children... }
+			</main>
+			@components.Footer(site)
+		</body>
+	</html>
+}
+
+
+==================================================
+FILE: website/templates/website/home.templ
+==================================================
+package website
+
+import (
+	"rkb/pkg/markdown"
+	"rkb/pkg/website"
+	"rkb/templates/layouts"
+)
+
+type TechCategory struct {
+	Title string
+	Items []TechItem
+}
+
+type TechItem struct {
+	Name string
+	URL  string
+}
+
+type Partner struct {
+	Name        string
+	Role        string
+	LinkedInURL string
+	CompanyName string
+	CompanyURL  string
+}
+
+var techStackCore = []TechCategory{
+	{
+		Title: "Frontend",
+		Items: []TechItem{
+			{Name: "HTMX", URL: "https://htmx.org/"},
+			{Name: "Alpine.js", URL: "https://alpinejs.dev/"},
+			{Name: "Tailwind CSS", URL: "https://tailwindcss.com/"},
+		},
+	},
+	{
+		Title: "Backend",
+		Items: []TechItem{
+			{Name: "Go", URL: "https://go.dev/"},
+			{Name: "Templ", URL: "https://templ.guide/"},
+			{Name: "Python", URL: "https://www.python.org/"},
+			{Name: "Django", URL: "https://www.djangoproject.com/"},
+			{Name: "FastAPI", URL: "https://fastapi.tiangolo.com/"},
+			{Name: "Flask", URL: "https://flask.palletsprojects.com/"},
+			{Name: "PostgreSQL", URL: "https://www.postgresql.org/"},
+			{Name: "MongoDB", URL: "https://www.mongodb.com/"},
+		},
+	},
+	{
+		Title: "Cloud & Infra",
+		Items: []TechItem{
+			{Name: "Docker", URL: "https://www.docker.com/"},
+			{Name: "Kubernetes", URL: "https://kubernetes.io/"},
+			{Name: "Terraform", URL: "https://www.terraform.io/"},
+			{Name: "Google Cloud", URL: "https://cloud.google.com/"},
+			{Name: "GitHub Actions", URL: "https://github.com/features/actions"},
+			{Name: "Make", URL: "https://www.gnu.org/software/make/"},
+		},
+	},
+	{
+		Title: "Platform",
+		Items: []TechItem{
+			{Name: "Firebase", URL: "https://firebase.google.com/"},
+			{Name: "Cloudflare", URL: "https://www.cloudflare.com/"},
+			{Name: "Stripe", URL: "https://stripe.com/"},
+		},
+	},
+	{
+		Title: "Tooling",
+		Items: []TechItem{
+			{Name: "JetBrains GoLand", URL: "https://www.jetbrains.com/go/"},
+			{Name: "VS Code", URL: "https://code.visualstudio.com/"},
+			{Name: "VIM", URL: "https://www.vim.org/"},
+		},
+	},
+	{
+		Title: "Operating System",
+		Items: []TechItem{{Name: "Ubuntu", URL: "https://ubuntu.com/"}},
+	},
+}
+
+var partners = []Partner{
+	{
+		Name:        "Johnsey Kivoto",
+		Role:        "CEO",
+		LinkedInURL: "https://www.linkedin.com/in/kivotoj/",
+		CompanyName: "Defend Technologies",
+		CompanyURL:  "https://www.linkedin.com/company/defend-technologies/",
+	},
+	{
+		Name:        "David Kimutai",
+		Role:        "Co-CEO",
+		LinkedInURL: "https://www.linkedin.com/in/kipdavids/",
+		CompanyName: "BINI",
+		CompanyURL:  "",
+	},
+	{
+		Name:        "Martin Kavili",
+		Role:        "Co-CEO",
+		LinkedInURL: "https://www.linkedin.com/in/mkavili/",
+		CompanyName: "BINI",
+		CompanyURL:  "",
+	},
+}
+
+templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post) {
+	@layouts.Base(site, seo, "/") {
+		// --- HERO SECTION ---
+		<section class="relative isolate px-6 lg:px-8">
+			<div class="mx-auto max-w-3xl py-32 lg:py-56">
+				<div class="text-left">
+					<h1 class="text-4xl font-semibold tracking-tight leading-tight text-white sm:text-6xl">
+						Hello!
+						<br/>
+						<span class="text-white">I'm Maciej Adamski</span>
+					</h1>
+					<p class="mt-6 text-base/7 text-white">
+						Software Engineer. Proud Father. Lifelong Learner.
+					</p>
+					<p class="mt-4 text-base/7 text-gray">
+						I build reliable software systems and explore the ideas that make us better humans.
+					</p>
+					<p class="mt-4 text-base/7 text-gray">
+						Welcome to my digital garden. 🌱
+					</p>
+					<div class="mt-10 flex flex-col items-start md:flex-row md:items-center gap-6">
+						<a href="/blog/" class="text-base font-semibold text-link underline underline-offset-4">Read my Blog</a>
+						<a href="https://www.linkedin.com/in/maciejadamski89/" target="_blank" class="text-base font-semibold text-link underline underline-offset-4">Connect with me on LinkedIn <span aria-hidden="true">&rarr;</span></a>
+					</div>
+				</div>
+			</div>
+		</section>
+		// --- ABOUT SECTION ---
+		<section id="about" class="py-24 px-6">
+			<div class="max-w-3xl mx-auto">
+				<h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>whoami<span class="text-link">_</span></h2>
+				<div class="space-y-6 text-base/7 text-gray">
+					<p>
+						I am a software engineer driven by curiosity. My professional world revolves around the Go and Python ecosystems,
+						where I focus on backend architecture, data tooling, and pragmatic automation. I like building things that work quietly and reliably.
+					</p>
+					<p>
+						But code is just one part of the equation.
+					</p>
+					<p>
+						I am also a proud dad, an animal lover, a musician, a gamer, and a reader of mind-changing books. I believe that the principles of good engineering, clarity, patience, and continuous improvement, apply just as well to fatherhood and personal growth.
+					</p>
+					<p>
+						On this site, I share what I’m learning from books, bugs, and life.
+					</p>
+				</div>
+			</div>
+		</section>
+		// --- DATAGLITCH SECTION ---
+		<section id="dataglitch" class="py-24 px-6">
+			<div class="max-w-3xl mx-auto">
+				<img src="/static/logos/dataglitch.png" alt="Dataglitch Logo" class="w-32 mb-8"/>
+				<div class="space-y-6 text-base/7 text-gray">
+					<p>
+						I am the founder of <span class="text-white font-semibold">Dataglitch</span>, a strategic partner for digital evolution.
+						We transform complex business challenges into cohesive, scalable software solutions.
+					</p>
+					<p>
+						Our mission is to deliver innovative, high-quality systems that go beyond expectations.
+						We don’t just build technology, we engineer systems designed for performance, simplicity, and seamless integration.
+					</p>
+					<p>
+						Whether you need to launch a vision faster with an MVP, transform data into your most valuable asset, or build on a rock-solid foundation, we are the partner you can trust.
+					</p>
+					<div class="mt-4">
+						<a href="https://dataglit.ch/" target="_blank" class="text-base font-semibold text-link underline underline-offset-4">
+							Visit Dataglitch <span aria-hidden="true">&rarr;</span>
+						</a>
+					</div>
+				</div>
+			</div>
+		</section>
+		// --- PARTNERS SECTION ---
+		if len(partners) > 0 {
+			<section id="partners" class="py-24 px-6">
+				<div class="max-w-3xl mx-auto">
+					<h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>business_partners<span class="text-link">_</span></h2>
+					<p class="text-base/7 text-gray mb-10">
+						Great work is rarely done in isolation. I am proud to collaborate with these exceptional leaders and companies who share a commitment to quality, innovation, and integrity.
+					</p>
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+						for _, partner := range partners {
+							<div class="p-6 border border-border rounded-lg bg-surface/50">
+								<h3 class="text-lg font-semibold text-white">{ partner.Name }</h3>
+								<p class="text-sm text-gray mb-4">
+									{ partner.Role } at
+									if partner.CompanyURL != "" {
+										<a href={ templ.SafeURL(partner.CompanyURL) } target="_blank" class="text-link hover:underline">{ partner.CompanyName }</a>
+									} else {
+										<span>{ partner.CompanyName }</span>
+									}
+								</p>
+								<div class="mt-auto">
+									<a href={ templ.SafeURL(partner.LinkedInURL) } target="_blank" class="text-sm font-semibold text-link underline underline-offset-4">
+										LinkedIn Profile <span aria-hidden="true">&rarr;</span>
+									</a>
+								</div>
+							</div>
+						}
+					</div>
+				</div>
+			</section>
+		}
+		// --- PHILOSOPHY ---
+		<section id="philosophy" class="py-24 px-6">
+			<div class="max-w-3xl mx-auto">
+				<h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>coding_philosophy<span class="text-link">_</span></h2>
+				<div class="space-y-6 text-base/7 text-gray">
+					<p>
+						<span class="text-white font-semibold">Less is More.</span>
+					</p>
+					<p>
+						I believe that complexity is the enemy of reliability. My approach to engineering (and life) is built on five core principles:
+					</p>
+					<ul class="list-disc pl-6 space-y-4">
+						<li>
+							<span class="text-white font-semibold">Simplicity is the Goal.</span> "Make things as simple as possible, but not simpler." I prefer boring, predictable code over clever hacks.
+						</li>
+						<li>
+							<span class="text-white font-semibold">Performance IS User Experience.</span> A beautiful interface means nothing if it’s slow. I prioritize raw speed and efficiency over fancy UI layers.
+						</li>
+						<li>
+							<span class="text-white font-semibold">Code is a Liability.</span> The best code is the code I didn't have to write. I practice YAGNI (You Ain't Gonna Need It) ruthlessly.
+						</li>
+						<li>
+							<span class="text-white font-semibold">Fail Fast, Fail Loud.</span> I handle errors explicitly. Systems should crash immediately when something is wrong, rather than limping along with hidden bugs.
+						</li>
+						<li>
+							<span class="text-white font-semibold">Observability First.</span> If you can't measure it, you don't control it. Logs and metrics are not an afterthought; they are part of the product.
+						</li>
+					</ul>
+				</div>
+			</div>
+		</section>
+		// --- TECH STACK ---
+		<section id="tech" class="py-24 px-6">
+			<div class="max-w-3xl mx-auto">
+				<h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>my_tech_stack<span class="text-link">_</span></h2>
+				<p class="text-gray text-base/7 mb-10">
+					A snapshot of the stack I use and the tools I reach for.
+				</p>
+				<div class="space-y-8">
+					for _, category := range techStackCore {
+						<div>
+							<h3 class="text-sm uppercase tracking-widest text-gray mb-4">{ category.Title }</h3>
+							<ul class="flex flex-wrap gap-3 text-sm">
+								for _, item := range category.Items {
+									<li class="px-3 py-1 rounded-full border border-border text-gray">
+										<a href={ item.URL } target="_blank" rel="noopener noreferrer" class="text-link underline underline-offset-4">{ item.Name }</a>
+									</li>
+								}
+							</ul>
+						</div>
+					}
+				</div>
+			</div>
+		</section>
+		// --- BLOG PROMO ---
+		<section class="pt-24 pb-36 px-6">
+			<div class="max-w-3xl mx-auto">
+				<h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>latest_thoughts<span class="text-link">_</span></h2>
+				<div class="divide-y divide-border">
+					if len(latestPosts) > 0 {
+						for _, post := range latestPosts {
+							<article class="py-8 first:pt-0">
+								<div class="flex items-center gap-x-4 text-sm">
+									<time datetime={ post.Meta.Date } class="text-gray">{ post.FormattedDate() }</time>
+								</div>
+								<div class="relative">
+									<h3 class="mt-3 text-lg/8 font-semibold text-white">
+										<a href={ templ.SafeURL("/blog/" + post.Slug + "/") } class="text-link underline underline-offset-4">
+											<span class="absolute inset-0"></span>
+											{ post.Meta.Title }
+										</a>
+									</h3>
+									if post.Meta.Description != "" {
+										<p class="mt-5 line-clamp-3 text-base/7 text-gray">{ post.Meta.Description }</p>
+									}
+								</div>
+							</article>
+						}
+					} else {
+						<p class="text-gray">No posts yet. Check back soon!</p>
+					}
+				</div>
+				<div class="mt-12">
+					<a href="/blog/" class="pt-12 text-base font-semibold text-link underline underline-offset-4">
+						Check out all of my blog posts <span aria-hidden="true">&rarr;</span>
+					</a>
+				</div>
+			</div>
+		</section>
+		// --- CONTACT ---
+		<section id="contact" class="pt-24 pb-36 px-6">
+			<div class="max-w-3xl mx-auto">
+				<h2 class="text-xl font-bold text-white mb-8"><span class="text-link mr-2">&gt;</span>contact<span class="text-link">_</span></h2>
+				<p class="text-base/7 text-gray mb-8">
+					I am always open to new connections and challenges. Whether you want to discuss a complex system architecture, need a partner for a new venture, or just want to chat about technology — I’m listening.
+				</p>
+				<p class="text-base/7 text-white font-semimedium mb-8">
+					I am confident that I am the right person to help with your challenge.
+				</p>
+				<div class="flex justify-start gap-4">
+					<a href="mailto:maciej.adamski@dataglit.ch" class="text-base font-semibold text-link underline underline-offset-4">
+						Email me &rarr;
+					</a>
+					<a href="https://linkedin.com/in/maciejadamski" target="_blank" class="text-base font-semibold text-link underline underline-offset-4">
+						LinkedIn &rarr;
+					</a>
+				</div>
+			</div>
+		</section>
+		// --- OPEN SOURCE ---
+		<section class="py-12 px-6 border-t border-border bg-surface">
+			<div class="max-w-3xl mx-auto text-center">
+				<p class="text-white text-base">
+					<a href="https://github.com/dg-dataglitch/maciejadamski.com" target="_blank" class="text-link underline underline-offset-4">You can find the code for this website here</a>
+				</p>
+			</div>
+		</section>
+	}
+}
+
+

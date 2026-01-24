@@ -44,3 +44,9 @@ docker: ## Build Docker image
 .PHONY: docker-run
 docker-run: docker ## Run Docker container
 	@docker run -p 8080:80 go-ssg-template
+
+.PHONY: codedump
+codedump: ## Export entire codebase to text file (runs .scripts/dump_codebase.sh)
+	@echo -e " > Dumping codebase..."
+	./.scripts/dump_codebase.sh
+
