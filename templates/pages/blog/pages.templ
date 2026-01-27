@@ -8,7 +8,7 @@ import (
 
 templ Index(site website.SiteConfig, seo website.SEO, posts []markdown.Post) {
 	@layouts.Base(site, seo, "/blog/") {
-		<div class="max-w-3xl mx-auto py-24">
+		<div class="max-w-3xl mx-auto py-24 px-4 lg:px-8">
 			<div class="mb-16 border-b border-border pb-12">
 				<h1 class="text-4xl text-heading font-semibold tracking-tight leading-tight mb-4">Blog</h1>
 				<p class="text-base/7 text-body">Thoughts, ideas, and tutorials</p>
@@ -41,7 +41,7 @@ templ Index(site website.SiteConfig, seo website.SEO, posts []markdown.Post) {
 
 templ PostPage(site website.SiteConfig, seo website.SEO, post markdown.Post) {
 	@layouts.Base(site, seo, "/blog/"+post.Meta.Slug+"/") {
-		<article class="max-w-3xl mx-auto py-24">
+		<article class="max-w-3xl mx-auto py-24 px-4 lg:px-8">
 			<header class="mb-12">
 				<h1 class="text-4xl text-heading font-semibold tracking-tight leading-tight mb-4">{ post.Meta.Title }</h1>
 				<div class="flex gap-4 text-body text-sm">
