@@ -61,15 +61,13 @@ func Build(components ComponentRegistry, opts BuildOptions) error {
 		return err
 	}
 
-	// Load blog posts for both Index and Blog sections
 	blogDir := filepath.Join(opts.ContentDir, "blog")
 	posts, err := markdown.ParseDir(blogDir)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("parsing blog directory: %w", err)
 	}
-	published := filterPublished(posts)
+	publishedPosts := filterPublished(posts)
 
-	// Build Homepage
 	if components.Index != nil {
 		seo := website.SEO{
 			Title:       site.Name,
@@ -78,18 +76,25 @@ func Build(components ComponentRegistry, opts BuildOptions) error {
 		}
 		outputPath := filepath.Join(opts.OutputDir, "index.html")
 		slog.Debug("rendering homepage", "path", outputPath)
-		if err := generator.RenderTemplComponent(outputPath, components.Index(site, seo, published)); err != nil {
+		if err := generator.RenderTemplComponent(outputPath, components.Index(site, seo, publishedPosts)); err != nil {
 			return fmt.Errorf("rendering homepage: %w", err)
 		}
 	}
 
-	// Build Blog Section
-	if err := buildBlog(components, opts, site, published); err != nil {
+	if err := buildBlog(components, opts, site, publishedPosts); err != nil {
 		return err
 	}
 
 	if err := copyStaticFiles(opts); err != nil {
 		return err
+	}
+
+	if err := GenerateSitemap(opts.OutputDir, opts.StaticDir, site.URL, publishedPosts); err != nil {
+		slog.Warn("failed to generate sitemap", "error", err)
+	}
+
+	if err := GenerateRobots(opts.OutputDir, opts.StaticDir, site.URL); err != nil {
+		slog.Warn("failed to generate robots.txt", "error", err)
 	}
 
 	slog.Info("build completed", "output", opts.OutputDir)
@@ -119,7 +124,6 @@ func buildBlog(components ComponentRegistry, opts BuildOptions, site website.Sit
 		return nil
 	}
 
-	// Render blog index if component provided
 	if components.BlogIndex != nil {
 		seo := website.SEO{
 			Title:       "Blog - " + site.Name,
@@ -135,7 +139,6 @@ func buildBlog(components ComponentRegistry, opts BuildOptions, site website.Sit
 		}
 	}
 
-	// Render individual posts
 	if components.BlogPost == nil {
 		slog.Warn("no BlogPost component provided, skipping post rendering")
 		return nil
