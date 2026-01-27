@@ -1,0 +1,17 @@
+name: "Maciej Adamski"
+url: "https://maciejadamski.com"
+description: "Software Engineer, Go Enthusiast, and Founder of Dataglitch."
+language: "en"
+locale: "en_US"
+default_image: "/static/og-image.png"
+default_image_width: "1200"
+default_image_height: "630"
+default_image_alt: "Maciej Adamski - Software Engineer"
+twitter_handle: "@maciejadamski"
+font_family: "google-sans-flex"
+custom_css:
+    - "/static/css/prose.css"
+google_analytics_id: "G-8N2WJRPVCH"
+google_search_console_verify: "Nax5qJbDjGM1csEKyBZpz9fu0fiEEsj_NhaR6VD5AYE"
+enable_htmx: false
+enable_alpine_js: true

@@ -2,14 +2,14 @@ package components
 
 import (
 	"fmt"
-	"rkb/pkg/website"
+	"maciejadamski/pkg/website"
 	"time"
 )
 
 templ Footer(site website.SiteConfig) {
 	<footer class="border-t border-border">
 		<div class="mx-auto max-w-7xl px-6 py-16 flex items-center justify-center lg:px-8">
-			<p class="text-center text-xs leading-5 text-gray">
+			<p class="text-center text-sm text-body">
 				&copy; { fmt.Sprintf("%d", time.Now().Year()) } { site.Name }. All rights reserved.
 			</p>
 		</div>

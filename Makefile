@@ -37,14 +37,6 @@ dev: ## Run development server with hot reload
 clean: ## Clean build artifacts
 	@rm -rf dist tmp
 
-.PHONY: docker
-docker: ## Build Docker image
-	@docker build -t go-ssg-template .
-
-.PHONY: docker-run
-docker-run: docker ## Run Docker container
-	@docker run -p 8080:80 go-ssg-template
-
 .PHONY: codedump
 codedump: ## Export entire codebase to text file (runs .scripts/dump_codebase.sh)
 	@echo -e " > Dumping codebase..."

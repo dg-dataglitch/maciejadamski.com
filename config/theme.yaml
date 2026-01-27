@@ -1,0 +1,29 @@
+# Colors - Antigravity-inspired with deep purple accent
+color_page_background: "#ffffff"
+color_surface: "#f8f9fc"
+color_border: "#dadce0"
+color_border_dark: "#c4c7cc"
+color_scrollbar: "#a8a29e"
+
+# Brand Color (deep purple)
+color_link: "#0b57d0"
+color_brand: "#52008d"
+
+# Typography Colors - Antigravity style
+color_text_heading: "#121317"
+color_text_body: "#5f6368"
+color_text_muted: "#70757a"
+color_text_bold: "#121317"
+color_text_italic: "#3c4043"
+color_text_code: "#52008d"
+color_text_pre: "#e8eaed"
+
+# Code Block Colors - Antigravity dark terminal style
+color_code_background: "#212226"
+
+# Typography Fonts
+font_sans: "'Google Sans Flex', 'Inter', sans-serif"
+font_mono: "'JetBrains Mono', monospace"
+
+# Layout
+radius_container: "8px"

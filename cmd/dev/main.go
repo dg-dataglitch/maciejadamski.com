@@ -2,38 +2,29 @@ package main
 
 import (
 	"log/slog"
-	"net/http"
 	"os"
-	"os/exec"
 
-	"rkb/pkg/config"
-	"rkb/pkg/logger"
+	"maciejadamski/pkg/server"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		panic(err)
-	}
-	l, err := logger.New(cfg.LogLevel)
-	if err != nil {
-		l, _ = logger.New("info")
-	}
-	slog.SetDefault(l)
-	l.Info("dev_server_starting", "running", "build")
-	buildCmd := exec.Command("go", "run", "./cmd/build")
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-	if err := buildCmd.Run(); err != nil {
-		l.Error("build_failed", "err", err)
+	_ = godotenv.Load()
+	setupLogger()
+	port := os.Getenv("PORT")
+	if err := server.Run(port, "dist"); err != nil {
+		slog.Error("server_failed", "error", err)
 		os.Exit(1)
 	}
-	addr := cfg.Addr()
-	l.Info("dev_server_listening", "addr", "http://"+addr)
-	fs := http.FileServer(http.Dir(cfg.DistPath))
-	http.Handle("/", fs)
-	if err := http.ListenAndServe(addr, nil); err != nil {
-		l.Error("server_failed", "err", err)
-		os.Exit(1)
+}
+
+func setupLogger() {
+	level := slog.LevelInfo
+	if env := os.Getenv("LOG_LEVEL"); env != "" {
+		_ = level.UnmarshalText([]byte(env))
 	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: level,
+	})))
 }

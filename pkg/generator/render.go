@@ -10,21 +10,29 @@ import (
 	"github.com/a-h/templ"
 )
 
+// RenderTemplComponent renders a templ component to an HTML file.
+// Creates parent directories if they don't exist.
 func RenderTemplComponent(path string, component templ.Component) error {
-	slog.Debug("rendering_component", "path", path)
+	slog.Debug("rendering component", "path", path)
+
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creation directory failed %s: %w", dir, err)
+		return fmt.Errorf("creating directory %s: %w", dir, err)
 	}
+
 	f, err := os.Create(path)
 	if err != nil {
-		return fmt.Errorf("creation file failed %s: %w", path, err)
+		return fmt.Errorf("creating file %s: %w", path, err)
 	}
-	defer func(f *os.File) {
-		cErr := f.Close()
-		if err != nil && cErr != nil {
-			slog.Error("file_close_failed", "path", path, "err", cErr)
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Error("failed to close file", "path", path, "error", err)
 		}
-	}(f)
-	return component.Render(context.Background(), f)
+	}()
+
+	if err := component.Render(context.Background(), f); err != nil {
+		return fmt.Errorf("rendering component to %s: %w", path, err)
+	}
+
+	return nil
 }

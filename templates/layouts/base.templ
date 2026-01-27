@@ -1,181 +1,145 @@
 package layouts
 
 import (
-	"encoding/json"
-	"rkb/pkg/website"
-	"rkb/templates/components"
+	"fmt"
+	"maciejadamski/pkg/website"
+	"maciejadamski/templates/components"
 )
 
-func organizationJSON(site website.SiteConfig) string {
-	org := map[string]interface{}{
-		"@context":    "https://schema.org",
-		"@type":       "Organization",
-		"name":        site.Name,
-		"url":         site.URL,
-		"description": site.Description,
-		"logo":        absoluteURL(site, site.OrgLogo),
-	}
-	b, _ := json.Marshal(org)
-	return string(b)
+// Helper to generate Google Analytics script tag
+func googleAnalyticsScript(id string) string {
+	return `<script async src="https://www.googletagmanager.com/gtag/js?id=` + id + `"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}
+gtag('js',new Date());gtag('config','` + id + `');</script>`
 }
 
-func absoluteURL(site website.SiteConfig, path string) string {
-	if path == "" {
+// Helper to wrap JSON-LD data in script tag
+func jsonLDScript(data string) string {
+	if data == "" {
 		return ""
 	}
-	if len(path) > 4 && (path[:4] == "http" || path[:5] == "https") {
-		return path
-	}
-	return site.URL + path
+	return `<script type="application/ld+json">` + data + `</script>`
 }
 
-func getSEOImage(site website.SiteConfig, seo website.SEO) string {
-	if seo.Image != "" {
-		return absoluteURL(site, seo.Image)
-	}
-	return absoluteURL(site, site.DefaultImage)
-}
-
-func articleJSON(site website.SiteConfig, seo website.SEO, path string) string {
-	article := map[string]interface{}{
-		"@context":      "https://schema.org",
-		"@type":         "Article",
-		"headline":      seo.Title,
-		"description":   seo.Description,
-		"url":           site.URL + path,
-		"datePublished": seo.PublishedAt,
-		"image":         getSEOImage(site, seo),
-		"publisher": map[string]interface{}{
-			"@type": "Organization",
-			"name":  site.Name,
-			"logo": map[string]interface{}{
-				"@type": "ImageObject",
-				"url":   absoluteURL(site, site.OrgLogo),
-			},
-		},
-	}
-	b, _ := json.Marshal(article)
-	return string(b)
-}
-
-func getOGType(seo website.SEO) string {
-	if seo.Type != "" {
-		return seo.Type
-	}
-	return "website"
-}
-
-func googleTagManagerScript(site website.SiteConfig) string {
-	if site.GoogleTagManagerID == "" {
-		return ""
-	}
-	return "<!-- Google Tag Manager --><script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':" +
-		"\nnew Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0]," +
-		"\nj=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=" +
-		"\n'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);" +
-		"\n})(window,document,'script','dataLayer','" + site.GoogleTagManagerID + "');</script><!-- End Google Tag Manager -->"
-}
-
-func googleAnalyticsScript(site website.SiteConfig) string {
-	if site.GoogleAnalyticsID == "" {
-		return ""
-	}
-	return "<script async src=\"https://www.googletagmanager.com/gtag/js?id=" + site.GoogleAnalyticsID + "\"></script>" +
-		"<script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());" +
-		"gtag('config', '" + site.GoogleAnalyticsID + "');</script>"
-}
-
-func organizationStructuredDataScript(site website.SiteConfig) string {
-	return "<script type=\"application/ld+json\">" + organizationJSON(site) + "</script>"
-}
-
-func articleStructuredDataScript(site website.SiteConfig, seo website.SEO, path string) string {
-	return "<script type=\"application/ld+json\">" + articleJSON(site, seo, path) + "</script>"
+// Generate CSS variables from theme config
+func themeCSS(t website.ThemeConfig) string {
+	return fmt.Sprintf(`
+		<style>
+		:root {
+			--font-sans: %s;
+			--font-mono: %s;
+			--color-text-heading: %s;
+			--color-text-body: %s;
+			--color-text-muted: %s;
+			--color-text-bold: %s;
+			--color-text-italic: %s;
+			--color-text-code: %s;
+			--color-text-pre: %s;
+			--color-link: %s;
+			--color-brand: %s;
+			--color-surface: %s;
+			--color-page-background: %s;
+			--color-border: %s;
+			--color-border-dark: %s;
+			--color-scrollbar: %s;
+			--color-code-background: %s;
+			--radius-container: %s;
+		}
+		</style>
+	`,
+		t.FontSans,
+		t.FontMono,
+		t.ColorTextHeading,
+		t.ColorTextBody,
+		t.ColorTextMuted,
+		t.ColorTextBold,
+		t.ColorTextItalic,
+		t.ColorTextCode,
+		t.ColorTextPre,
+		t.ColorLink,
+		t.ColorBrand,
+		t.ColorSurface,
+		t.ColorPageBackground,
+		t.ColorBorder,
+		t.ColorBorderDark,
+		t.ColorScrollbar,
+		t.ColorCodeBackground,
+		t.RadiusContainer,
+	)
 }
 
 templ Base(site website.SiteConfig, seo website.SEO, currentPath string) {
 	<!DOCTYPE html>
-	<html lang={ site.Language } class="dark h-full antialiased overflow-y-scroll">
+	<html lang={ website.GetLanguage(site) } class="dark h-full antialiased overflow-y-scroll">
 		<head>
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-			if site.GoogleTagManagerID != "" {
-				@templ.Raw(googleTagManagerScript(site))
-			}
-			<!-- Fonts: JetBrains Mono -->
-			<link rel="preconnect" href="https://fonts.googleapis.com"/>
-			<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-			<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100..800&display=swap" rel="stylesheet"/>
-			<!-- Custom CSS -->
-			<link rel="stylesheet" href="/static/css/prose.css"/>
-			<link rel="icon" href="/static/favicon.ico" type="image/x-icon"/>
+			<!-- Basic Meta Tags -->
 			<title>{ seo.Title }</title>
-			if seo.Description != "" {
-				<meta name="description" content={ seo.Description }/>
-			}
-			if seo.Canonical != "" {
-				<link rel="canonical" href={ seo.Canonical }/>
-			} else {
-				<link rel="canonical" href={ site.URL + currentPath }/>
-			}
-			if seo.NoIndex {
-				<meta name="robots" content="noindex,nofollow"/>
-			} else {
-				<meta name="robots" content="index,follow"/>
-			}
+			<meta name="description" content={ seo.Description }/>
+			<meta name="robots" content={ website.GetRobots(seo) }/>
+			<link rel="canonical" href={ website.GetCanonical(site, seo, currentPath) }/>
+			<!-- Favicon -->
+			<link rel="icon" href="/static/favicon.ico" type="image/x-icon"/>
 			<!-- Open Graph -->
-			<meta property="og:type" content={ getOGType(seo) }/>
+			<meta property="og:type" content={ website.GetOGType(seo) }/>
 			<meta property="og:url" content={ site.URL + currentPath }/>
 			<meta property="og:title" content={ seo.Title }/>
-			if seo.Description != "" {
-				<meta property="og:description" content={ seo.Description }/>
+			<meta property="og:description" content={ seo.Description }/>
+			<meta property="og:image" content={ website.GetOGImage(site, seo) }/>
+			if width := website.GetOGImageWidth(site, seo); width != "" {
+				<meta property="og:image:width" content={ width }/>
 			}
-			<meta property="og:image" content={ getSEOImage(site, seo) }/>
+			if height := website.GetOGImageHeight(site, seo); height != "" {
+				<meta property="og:image:height" content={ height }/>
+			}
+			if alt := website.GetOGImageAlt(site, seo); alt != "" {
+				<meta property="og:image:alt" content={ alt }/>
+			}
 			<meta property="og:site_name" content={ site.Name }/>
-			<!-- Twitter -->
-			<meta name="twitter:card" content="summary"/>
+			<!-- Twitter Card -->
+			<meta name="twitter:card" content={ website.GetTwitterCard(seo) }/>
 			<meta name="twitter:title" content={ seo.Title }/>
-			if seo.Description != "" {
-				<meta name="twitter:description" content={ seo.Description }/>
+			<meta name="twitter:description" content={ seo.Description }/>
+			<meta name="twitter:image" content={ website.GetOGImage(site, seo) }/>
+			if website.GetTwitterSite(site) != "" {
+				<meta name="twitter:site" content={ website.GetTwitterSite(site) }/>
 			}
-			<meta name="twitter:image" content={ getSEOImage(site, seo) }/>
-			<!-- Google -->
+			<!-- Google Verification -->
 			if site.GoogleSearchConsoleVerify != "" {
 				<meta name="google-site-verification" content={ site.GoogleSearchConsoleVerify }/>
 			}
-			<!-- Structured Data -->
-			if currentPath == "/" {
-				@templ.Raw(organizationStructuredDataScript(site))
+			<!-- Structured Data (JSON-LD) -->
+			if seo.IsHomePage {
+				@templ.Raw(jsonLDScript(website.OrganizationSchema(site)))
 			}
-			if seo.Type == "article" {
-				@templ.Raw(articleStructuredDataScript(site, seo, currentPath))
+			if seo.IsArticle {
+				@templ.Raw(jsonLDScript(website.BlogPostingSchema(site, seo, currentPath)))
 			}
+			<!-- Fonts: Dynamic based on config + JetBrains Mono for code -->
+			<link rel="preconnect" href="https://fonts.googleapis.com"/>
+			<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+			<link href={ website.GetFontConfig(site.FontFamily).URL } rel="stylesheet"/>
+			<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100..800&display=swap" rel="stylesheet"/>
+			<!-- Custom CSS -->
+			<link rel="stylesheet" href="/static/css/prose.css"/>
 			<!-- Tailwind CSS -->
 			<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 			<script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script>
-			<style>
-				:root {
-					--font-sans: 'JetBrains Mono', monospace;
-					--font-mono: 'JetBrains Mono', monospace;
-					--color-white: #e4e4e5;
-					--color-white-pure: #ffffff;
-					--color-gray: #909093;
-					--color-link: #b2c3ff;
-					--color-surface: #343438;
-					--color-page-background: #1c1c1d;
-					--color-border: #39393b;
-					--color-border-dark: #333333;
-					--color-scrollbar: #555555;
-					--radius-container: 12px;
-				}
-			</style>
+			<!-- Theme Config -->
+			@templ.Raw(themeCSS(site.Theme))
 			<style type="text/tailwindcss">
 				@theme {
 						--font-sans: var(--font-sans);
 						--font-mono: var(--font-mono);
-						--color-white: var(--color-white);
-						--color-gray: var(--color-gray);
+						--color-heading: var(--color-text-heading);
+						--color-body: var(--color-text-body);
+						--color-bold: var(--color-text-bold);
+						--color-italic: var(--color-text-italic);
+						--color-code: var(--color-text-code);
+						--color-pre: var(--color-text-pre);
 						--color-link: var(--color-link);
+						--color-brand: var(--color-brand);
 						--color-surface: var(--color-surface);
 						--color-page-background: var(--color-page-background);
 						--color-border: var(--color-border);
@@ -183,22 +147,10 @@ templ Base(site website.SiteConfig, seo website.SEO, currentPath string) {
 			</style>
 			<!-- Analytics -->
 			if site.GoogleAnalyticsID != "" {
-				@templ.Raw(googleAnalyticsScript(site))
+				@templ.Raw(googleAnalyticsScript(site.GoogleAnalyticsID))
 			}
 		</head>
-		<body class="bg-page-background font-mono text-white text-base min-h-full flex flex-col">
-			if site.GoogleTagManagerID != "" {
-				<!-- Google Tag Manager (noscript) -->
-				<noscript>
-					<iframe
-						src={ "https://www.googletagmanager.com/ns.html?id=" + site.GoogleTagManagerID }
-						height="0"
-						width="0"
-						style="display:none;visibility:hidden"
-					></iframe>
-				</noscript>
-				<!-- End Google Tag Manager (noscript) -->
-			}
+		<body class="min-h-full flex flex-col antialiased bg-page-background text-text-body">
 			@components.Navbar(site)
 			<main class="flex-1">
 				{ children... }
