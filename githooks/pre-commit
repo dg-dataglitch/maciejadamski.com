@@ -1,19 +1,30 @@
 #!/bin/sh
 
 echo "------------------------------------------------"
-echo "Running pre-commit hook: make build"
+echo "Running pre-commit hook"
 echo "------------------------------------------------"
 
-# Run the build
-make build
+# Step 1: Run tests
+echo "[1/2] Running tests..."
+make test
+if [ $? -ne 0 ]; then
+    echo "[FAIL] Tests failed! Commit aborted."
+    exit 1
+fi
+echo "[OK] Tests passed."
 
-# Check for errors
+# Step 2: Run build
+echo "[2/2] Running build..."
+make build
 if [ $? -ne 0 ]; then
     echo "[FAIL] Build failed! Commit aborted."
     exit 1
 fi
+echo "[OK] Build successful."
 
-# Stage the artifacts so they are included in the commit
+# Stage the dist artifacts
 git add dist
 
-echo "[OK] Build successful. 'dist' folder staged."
+echo "------------------------------------------------"
+echo "[OK] Pre-commit checks passed. 'dist' folder staged."
+echo "------------------------------------------------"

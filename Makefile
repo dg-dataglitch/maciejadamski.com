@@ -18,6 +18,10 @@ templ: ## Generate templ templates
 fmt: ## Format templ templates
 	@templ fmt .
 
+.PHONY: test
+test: ## Run all tests
+	@go test ./...
+
 .PHONY: build
 build: templ ## Generate static site
 	@echo "> Cleaning dist..."
