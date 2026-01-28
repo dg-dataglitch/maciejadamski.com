@@ -266,18 +266,20 @@ templ Home(site website.SiteConfig, seo website.SEO, latestPosts []markdown.Post
 				<h2 class="text-2xl font-bold text-heading mb-8 tracking-tight">latest_thoughts_</h2>
 				<div class="divide-y divide-border">
 					if len(latestPosts) > 0 {
-						for _, post := range latestPosts {
-							<article class="py-8 first:pt-0">
-								<p class="text-body text-xs uppercase tracking-widest mb-4">{ post.Meta.FormattedDate() }</p>
-								<h3 class="text-xl font-semibold tracking-tight leading-tight mb-3">
-									<a href={ templ.SafeURL("/blog/" + post.Meta.Slug + "/") } class="text-link underline underline-offset-4">
-										{ post.Meta.Title }
-									</a>
-								</h3>
-								if post.Meta.Description != "" {
-									<p class="mt-4 line-clamp-3 text-base/7 text-body">{ post.Meta.Description }</p>
-								}
-							</article>
+						for i, post := range latestPosts {
+							if i < 3 {
+								<article class="py-8 first:pt-0">
+									<p class="text-body text-xs uppercase tracking-widest mb-4">{ post.Meta.FormattedDate() }</p>
+									<h3 class="text-xl font-semibold tracking-tight leading-tight mb-3">
+										<a href={ templ.SafeURL("/blog/" + post.Meta.Slug + "/") } class="text-link underline underline-offset-4">
+											{ post.Meta.Title }
+										</a>
+									</h3>
+									if post.Meta.Description != "" {
+										<p class="mt-4 line-clamp-3 text-base/7 text-body">{ post.Meta.Description }</p>
+									}
+								</article>
+							}
 						}
 					} else {
 						<p class="text-body">No posts yet. Check back soon!</p>
