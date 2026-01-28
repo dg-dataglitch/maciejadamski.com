@@ -1,8 +1,13 @@
 ---
 title: "Why developers should ditch Google Tag Manager"
 date: "2026-01-22"
+author: "Maciej Adamski"
 published: true
 description: "In modern web development, there is a constant tension between marketing agility and engineering reality. GTM is often a Trojan horse. Here is why you should cut out the middleman."
+---
+
+**TL;DR:** Google Tag Manager adds a "middleman tax" to your website: extra network requests, main thread blocking, and hidden performance costs. For solo developers and small teams, hardcode Google Analytics directly, use Google Search Console for SEO, and skip GTM entirely. Your site will be faster, your code more maintainable, and your users happier.
+
 ---
 
 In modern web development, there is a constant tension between marketing agility and engineering reality.
@@ -15,29 +20,31 @@ It sounds like a win-win. But if you care about performance, simplicity, and mai
 
 As engineers, it is time we treated GTM for what it is; an unnecessary abstraction layer that introduces latency and technical debt.
 
-Here is the developer’s perspective on why you should cut out the middleman, which tools you actually need, and how to prove the performance cost yourself.
+Here is the developer's perspective on why you should cut out the middleman, which tools you actually need, and how to prove the performance cost yourself.
 
-## The high cost of "convenience"
+
+## What is the real cost of GTM's "convenience"?
 
 My engineering philosophy is built on a simple premise; less is more. Every line of code is a liability. Every external dependency is a potential point of failure or friction.
 
 Google Tag Manager violates this principle by design. It is a container script whose sole purpose is to inject other scripts.
 
-### The technical problem -> the JavaScript waterfall
+### How does the JavaScript waterfall work?
 
 When you install GTM, you aren't just adding one script to your `<head>`. You are adding a gatekeeper.
 
 Here is what happens in the browser network waterfall when a user visits a site using GTM:
 
 1. **The browser downloads `gtm.js`:** This library is hefty because it contains the logic to parse rules, triggers, and variables.
-2. **Execution & parsing:** The browser’s main thread, the same thread responsible for responding to user clicks and scrolling, must pause to execute this library. It has to figure out "What page am I on? What rules apply here?".
+2. **Execution & parsing:** The browser's main thread, the same thread responsible for responding to user clicks and scrolling, must pause to execute this library. It has to figure out "What page am I on? What rules apply here?".
 3. **Injection waterfall:** Once GTM figures out what to do, it starts injecting other tags. It might inject Google Analytics (`gtag.js`), then a Facebook Pixel, then a LinkedIn Insight tag.
 
 This is the "middleman tax".
 
 Instead of the browser just downloading Google Analytics directly (a single request), it has to download the manager, run the manager, and then download analytics.
 
-## The performance impact -> total blocking time (TBT)
+
+## How does GTM hurt Total Blocking Time (TBT)?
 
 The real killer isn't just the network request; it is the CPU usage.
 
@@ -45,15 +52,17 @@ JavaScript is single-threaded. When GTM is busy evaluating dozens of triggers to
 
 If a user tries to click a button or open a menu while GTM is thinking, the site will feel sluggish or unresponsive. In performance metrics, this increases total blocking time (TBT); a metric which directly hurts your Core Web Vitals and, consequently, user experience and SEO.
 
-## The philosophy problem -> loss of control
+
+## Why is GTM a control problem for engineers?
 
 As a backend engineer, I want source control for everything. If a piece of logic changes how my application behaves, I want to see that change in a Git commit diff.
 
-GTM hides critical application logic inside a proprietary Google dashboard. If your site suddenly slows down, you can’t `git blame` to see who added a massive 5MB unoptimized Hotjar recording script. You have to log into GTM, dig through version history, and decipher what happened.
+GTM hides critical application logic inside a proprietary Google dashboard. If your site suddenly slows down, you can't `git blame` to see who added a massive 5MB unoptimized Hotjar recording script. You have to log into GTM, dig through version history, and decipher what happened.
 
 If you are the engineer responsible for the site, you should control the code that runs on it.
 
-## The essentials -> what you actually need
+
+## What analytics tools do you actually need?
 
 Ditching GTM does not mean flying blind. Data is crucial. But we need to distinguish between essential telemetry and bloated tag management.
 
@@ -73,7 +82,8 @@ There are two Google tools that are non-negotiable for any serious website.
 
 By hardcoding GA4, you ensure it loads as fast as possible, it is version-controlled in Git, and you aren't loading the entire GTM library just to fire a simple pageview event.
 
-## The diagnosis -> how to audit your site with Lighthouse
+
+## How do you audit your site with Lighthouse?
 
 You don't have to take my word for it. You can see the impact of scripts on your own site using Google Lighthouse, the industry-standard performance auditing tool built into Chrome.
 
@@ -90,13 +100,33 @@ If you care about performance, Lighthouse should be part of your regular workflo
    - **Categories:** Ensure "Performance" is checked.
 5. **Run the audit:** Click the blue Analyze page load button. The browser will reload your page several times while simulating a slower network and CPU.
 
-### Interpreting the results for script bloat
+### What should you look for in the results?
 
 When the report finishes, ignore the overall score for a moment and scroll down to the Diagnostics section. Look for these specific red flags related to GTM and third-party scripts:
 
 - **"Reduce unused JavaScript":** Lighthouse will flag scripts that downloaded a lot of code but only used a tiny fraction of it. GTM containers often show up here because they contain logic for every possible tag, even ones not firing on the current page.
 - **"Minimize main-thread work":** This is the CPU culprit. Expand this item, and you will often see expensive tasks related to script evaluation originating from GTM.
 - **Total blocking time (TBT) score:** Look at this metric at the top. If it is in the red (over 600ms), it means scripts are severely locking up the browser.
+
+
+## Frequently Asked Questions
+
+**Do I need GTM if I only use Google Analytics?**
+
+No. If Google Analytics is your only tracking need, hardcode the `gtag.js` snippet directly. GTM adds overhead with zero benefit in this scenario.
+
+**What if my marketing team needs to add tracking pixels?**
+
+Evaluate each request critically. Most tracking pixels (Facebook, LinkedIn, TikTok) can be hardcoded just as easily as GA4. If the marketing team needs frequent changes, consider a lightweight alternative like Partytown that runs scripts in a web worker.
+
+**Will removing GTM hurt my SEO?**
+
+The opposite. Removing GTM typically improves Core Web Vitals scores (especially TBT and LCP), which directly benefits SEO rankings.
+
+**How do I convince my team to drop GTM?**
+
+Run a Lighthouse audit with GTM enabled, then disable GTM and run it again. The performance difference is usually dramatic enough to end the debate.
+
 
 ## The minimalist conclusion
 
@@ -105,3 +135,8 @@ If you are a solo developer or part of a small engineering team, you do not need
 It is an abstraction designed for organizational silos that you don't have. It trades performance for a convenience that you don't need.
 
 Stick to the essentials. Hardcode your analytics. Keep your main thread clear. Your users will thank you for the speed, and your future self will thank you for the maintainable code.
+
+
+### About the Author
+
+Maciej Adamski is a software engineer and founder of Dataglitch, specializing in high-performance web applications and backend development. He writes about web performance, pragmatic engineering, and the pursuit of simplicity in code.

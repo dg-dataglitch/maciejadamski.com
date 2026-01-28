@@ -1,8 +1,13 @@
 ---
 title: "How I work with AI: my coding partner instructions for Go"
 date: "2026-01-26"
+author: "Maciej Adamski"
 published: true
 description: "I wrote 1,400 lines of instructions that turn any AI into my ideal coding mentor. Simplicity-first philosophy, Go patterns, NASA-inspired defensive programming, and structured observability."
+---
+
+**TL;DR:** I created a 1,400-line document that transforms AI coding assistants into principled mentors. It encodes my software philosophy (simplicity, YAGNI, explicit control), Go-specific patterns, NASA-inspired defensive programming, and a structured engineering journal system. The AI guides me by default but switches to implementation mode on command.
+
 ---
 
 **Link to the full instructions: [AI Coding Partner Instructions](https://gist.github.com/maciejadamski89/06d6e4a3a8c1d6d481f974d763c16c6e)**
@@ -13,7 +18,8 @@ So I wrote a document. A comprehensive set of instructions that tells the AI exa
 
 This is not a prompt template. It is a philosophy of software development, encoded into rules that any AI can follow. I am sharing it publicly because I believe it can help others build better software and become better engineers.
 
-## Why I created this
+
+## Why did I create custom AI instructions?
 
 I have two goals when I code:
 
@@ -25,7 +31,7 @@ These goals are often in tension. If I want to learn, I should struggle. If I wa
 The instructions also encode my philosophy. I follow the masters: Rob Pike's "less is more", Rich Hickey's "simple vs easy", Linus Torvalds' hatred of complexity, Sandi Metz's refactoring rules. Every time I start a new chat, the AI already knows what I value.
 
 
-## The core philosophy
+## What is the core philosophy?
 
 The document opens with a clear statement:
 
@@ -36,7 +42,7 @@ This is not a platitude. It is a filter for every decision. Should I add this ab
 The instructions include YAGNI (You Ain't Gonna Need It) as a core principle. We ruthlessly cut any code, argument, or conditional that is not required right now. The AI is trained to challenge me when I start building for hypothetical futures.
 
 
-## The collaboration workflow
+## How does the collaboration workflow work?
 
 This is perhaps the most important section. It defines how we work together:
 
@@ -52,7 +58,7 @@ The AI does not dump full solutions. It does not proceed without my confirmation
 But there is an escape hatch. When I say "please implement it" or "vibe coding session", the AI switches modes and provides complete code immediately. Sometimes I need to ship fast. The instructions respect that.
 
 
-## Go-specific patterns
+## What Go patterns do I enforce?
 
 The document contains an extensive section on Go patterns. These are not suggestions. They are rules that shape every function, every interface, every package.
 
@@ -67,7 +73,7 @@ Concurrency: never start a goroutine you cannot stop. Always pass context.Contex
 The document includes concrete examples for each rule. Bad code and good code, side by side. The AI sees exactly what I expect.
 
 
-## Defensive programming
+## What is defensive programming?
 
 I borrowed principles from NASA's Power of 10 rules. These are practices from safety-critical software development that prevent entire categories of bugs.
 
@@ -80,7 +86,7 @@ Static analysis: run golangci-lint with strict settings. Zero warnings tolerance
 These rules sound paranoid until you have debugged an infinite loop in production at 3 AM.
 
 
-## Observability
+## How do I handle observability and logging?
 
 Logging is not an afterthought. It is a core feature. The instructions define exactly what good logging looks like.
 
@@ -100,7 +106,7 @@ DEBUG trace_id=abc123 msg="request completed" status=201 duration_ms=45
 This level of detail saves hours when something goes wrong.
 
 
-## The engineering journal
+## What is the engineering journal system?
 
 The instructions include a system for documentation that I call the engineering journal. It has three components:
 
@@ -113,7 +119,7 @@ Daily log: a simple bullet journal for capturing thoughts during work. One file 
 The AI knows to ask me for the next number before generating entries. It knows to generate ADRs automatically when we reach agreement. Knowledge does not disappear into chat history.
 
 
-## What this changes
+## What changes after using these instructions?
 
 After using these instructions for months, I notice several changes:
 
@@ -126,7 +132,7 @@ Debugging became systematic. The instructions define a factual debugging process
 Consistency increased. Every file follows the same patterns. Every error is handled the same way. Every log entry has the same structure.
 
 
-## How to use it
+## How can you use these instructions?
 
 The full document is available as a GitHub Gist. You can use it directly or adapt it to your own philosophy.
 
@@ -135,6 +141,25 @@ To use it with Claude, Cursor, Windsurf, or similar tools, paste it into your sy
 I encourage you to read it completely before using it. Understand the philosophy. Disagree with parts if you want. Make it yours. The goal is not to follow my rules. The goal is to have rules at all.
 
 Link to the full instructions: [AI Coding Partner Instructions](https://gist.github.com/maciejadamski89/06d6e4a3a8c1d6d481f974d763c16c6e)
+
+
+## Frequently Asked Questions
+
+**Can I use these instructions with any AI coding assistant?**
+
+Yes. The instructions work with Claude, ChatGPT, Cursor, Windsurf, and any AI that accepts system prompts or custom instructions. The format is plain markdown.
+
+**Do I need to use Go to benefit from this document?**
+
+No. While the Go patterns section is language-specific, the philosophy, collaboration workflow, and engineering journal system apply to any language. You can replace the Go section with patterns for Python, TypeScript, or Rust.
+
+**How do I switch between learning mode and "vibe coding" mode?**
+
+Say "please implement it" or "vibe coding session" to trigger implementation mode. The AI will provide complete code immediately instead of guiding you step by step.
+
+**How long did it take to write these instructions?**
+
+The initial version took a weekend. But I refine it continuously as I discover new patterns or edge cases. It is a living document.
 
 
 ## Final thoughts
@@ -146,3 +171,8 @@ These instructions are my principles, encoded. They represent years of learning 
 I share them hoping they help you build simpler software and become a better engineer.
 
 Clear is better than clever. Always.
+
+
+### About the Author
+
+Maciej Adamski is a software engineer and founder of Dataglitch, specializing in Go backend development and high-performance web applications. He writes about software craftsmanship, AI-assisted development, and the pursuit of simplicity in code.

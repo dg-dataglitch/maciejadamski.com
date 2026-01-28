@@ -1,6 +1,7 @@
 ---
 title: "Why you shouldn't use SELECT * in production"
 date: "2026-01-20"
+author: "Maciej Adamski"
 published: true
 description: "A classic engineering trade-off: Convenience vs. Stability. Why SELECT * is a landmine in production applications, especially in Go."
 ---
@@ -9,31 +10,38 @@ description: "A classic engineering trade-off: Convenience vs. Stability. Why SE
 
 ---
 
-In a quick prototype or a local script, `SELECT *` feels like a shortcut. It’s easy and fast. But in a production Go application, that shortcut is a landmine waiting for a teammate to step on it.
+In a quick prototype or a local script, `SELECT *` feels like a shortcut. It's easy and fast. But in a production Go application, that shortcut is a landmine waiting for a teammate to step on it.
 
 Software engineering is the art of making trade-offs. While `SELECT *` offers **convenience**, it sacrifices **stability**. Here is why high-level engineering requires explicit column selection.
 
-## The "positional scan" crash
+
+## What is the "positional scan" crash?
+
 In Go, the standard `database/sql` package—and even lower-level drivers—are remarkably literal. When you use `row.Scan()`, the program doesn't look at column names; it only sees the **order** of the data coming off the wire.
 
 * **The implicit contract:** Your code expects Column 1 to be an `ID` (int) and Column 2 to be an `Email` (string).
 * **The fragile reality:** If a teammate runs a migration—perhaps adding a `MiddleName` column between `ID` and `Email`—your code will blindly try to shove a string into an integer variable.
 
-
 **The result:** Your application crashes in production with a type mismatch error. By explicitly listing your columns, you guarantee the order of the data, making your logic immune to schema changes.
 
-## Hidden performance killers: the pipeline view
-Engineering isn't just about how fast a query runs on the database; it’s about the entire data pipeline.
+
+## How does SELECT * kill database performance?
+
+Engineering isn't just about how fast a query runs on the database; it's about the entire data pipeline.
 
 ### Network and memory bloat
+
 Your `users` table might be lean today. But what happens when someone adds a `profile_picture_blob` or a massive `metadata` JSON field? If you use `SELECT *`, you are now dragging megabytes of unnecessary data across the network and deserializing it into memory for every single query—even if you only needed a username.
 
 ### The "covering index" hit
+
 This is the Staff-level "why." Databases are fast because of **indexes**. A "Covering Index" allows the database to answer your query using only the index, without ever touching the actual table (the "heap"). 
 
-When you use `SELECT *`, you force the database to fetch every single column from the heap. You effectively kill the database’s ability to stay in its "fast lane," turning a millisecond operation into a disk-I/O bottleneck.
+When you use `SELECT *`, you force the database to fetch every single column from the heap. You effectively kill the database's ability to stay in its "fast lane," turning a millisecond operation into a disk-I/O bottleneck.
 
-## The "greppability" test
+
+## Why does greppability matter for refactoring?
+
 Code must be searchable. Imagine you are tasked with renaming a column or deprecating a field. 
 
 If you explicitly list `email_address` in your SQL queries, a simple `grep` or "Find Usages" in your IDE will show you exactly which parts of your Go application are affected. If you use `SELECT *`, your code becomes a **black box**. You have no way of knowing which fields are actually used by the business logic without running the code and hoping for the best. 
@@ -41,7 +49,8 @@ If you explicitly list `email_address` in your SQL queries, a simple `grep` or "
 **Explicit code is maintainable code.**
 
 
-## Why I use `pgx` over "magic" frameworks
+## Why should you use pgx over "magic" frameworks?
+
 Choosing a tool like **`pgx`** over a heavy ORM follows the philosophy of **"Simple, not easy."**
 
 * **Performance:** `pgx` supports PostgreSQL-specific features like binary protocol and `COPY` that generic wrappers hide.
@@ -49,7 +58,7 @@ Choosing a tool like **`pgx`** over a heavy ORM follows the philosophy of **"Sim
 * **Granular control:** It gives you PostgreSQL-specific error codes, making it easy to distinguish a connection timeout from a constraint violation.
 
 
-## Before & after: the landmine vs. the contract
+## What does the code look like: Before and after?
 
 ### ❌ The "landmine" (fragile)
 ```go
@@ -63,9 +72,10 @@ func GetUser(ctx context.Context, db *pgx.Conn, id int) (*User, error) {
     )
     return &u, err
 }
-✅ The "contract" (robust)
-Go
+```
 
+### ✅ The "contract" (robust)
+```go
 const userFields = "id, email, name"
 
 func GetUser(ctx context.Context, db *pgx.Conn, id int) (*User, error) {
@@ -87,7 +97,32 @@ func GetUser(ctx context.Context, db *pgx.Conn, id int) (*User, error) {
 ```
 
 
+## Frequently Asked Questions
+
+**Is SELECT * ever acceptable?**
+
+In ad-hoc queries, local scripts, or database exploration tools—yes. In production application code—never. The trade-off always favors stability over convenience.
+
+**What if my table has 50 columns and I need most of them?**
+
+Define a constant like `const userFields = "col1, col2, col3, ..."` at the top of your repository file. This keeps queries readable and gives you a single source of truth for which columns you depend on.
+
+**Does this advice apply to ORMs like GORM?**
+
+Yes. Even ORMs that handle column mapping can suffer from performance issues (fetching unnecessary columns) and make refactoring harder. Prefer explicit `Select()` clauses over default behavior.
+
+**How do I catch SELECT * in code reviews?**
+
+Add a linter rule or grep check to your CI pipeline that flags any occurrence of `SELECT *` or `select *` in your codebase.
+
+
 ## Summary
+
 A junior engineer writes code that works today. A Senior engineer writes code that works three years from now, even after dozens of schema migrations.
 
 Avoid SELECT *. Be explicit. Treat your SQL as a strict contract, and your production environment will thank you.
+
+
+### About the Author
+
+Maciej Adamski is a software engineer and founder of Dataglitch, specializing in Go backend development and PostgreSQL optimization. He writes about database best practices, software craftsmanship, and the pursuit of simplicity in code.
