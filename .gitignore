@@ -31,3 +31,4 @@ build-errors.log
 *_templ.go
 .dumps/
 .docs/
+.gemini/
