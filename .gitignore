@@ -30,3 +30,4 @@ build-errors.log
 # Generated templ files (regenerated on build)
 *_templ.go
 .dumps/
+.docs/
